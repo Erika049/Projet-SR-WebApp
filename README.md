@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SchoolConnect — application web
 
-## Getting Started
+Plateforme de gestion des établissements secondaires camerounais (UCAC-ICAM, Groupe 5).
+L'application web couvre les espaces **super-administrateur, direction, secrétariat, surveillance générale et
+comptabilité**. Les enseignants, parents et élèves utilisent l'application mobile.
 
-First, run the development server:
+## Démarrer
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Ouvrir http://localhost:3000 : l'application redirige vers `/fr/connexion`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Par défaut, l'application tourne en **mode données d'exemple** (aucune API nécessaire). Les données reprennent les
+maquettes (Lycée bilingue de Bafoussam). Elles vivent en mémoire et se réinitialisent au redémarrage du serveur.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Comptes de démonstration
 
-## Learn More
+Mot de passe : `demo1234` (ou cliquez sur un compte sous le formulaire de connexion).
 
-To learn more about Next.js, take a look at the following resources:
+| Rôle | Identifiant |
+|---|---|
+| Super-administrateur | admin@schoolconnect.cm |
+| Directeur | p.nkeng@lycee-bafoussam.cm |
+| Secrétaire | j.tchoua@lycee-bafoussam.cm |
+| Surveillant général | e.owona@lycee-bafoussam.cm |
+| Comptable | m.biloa@lycee-bafoussam.cm |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Brancher l'API Spring Boot
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Copier `.env.example` en `.env.local`, puis :
 
-## Deploy on Vercel
+```
+USE_MOCK_API=false
+API_URL=https://api.schoolconnect.cm/api/v1
+SESSION_SECRET=<32 caractères aléatoires ou plus>
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Les chemins d'API attendus sont écrits dans chaque `src/features/*/queries.ts` et `actions.ts`.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Scripts
+
+| Commande | Rôle |
+|---|---|
+| `npm run dev` | serveur de développement |
+| `npm run build` | build de production (vérifie aussi les types) |
+| `npm start` | serveur de production |
+| `npm run lint` | ESLint |
+
+## Documentation
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — architecture, routes par rôle, modules, sécurité, conventions.
+- Next.js 16 : lire `node_modules/next/dist/docs/` avant de modifier le code (voir `AGENTS.md`).
