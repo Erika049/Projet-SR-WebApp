@@ -1,6 +1,6 @@
-// Annonces — CU-SUR-07
+// Annonces aux parents (backend SchoolConnect : /etablissements/{id}/annonces).
 import { AnnoncesPage } from "@/features/annonces/components/annonces-page";
 
 export default function Page() {
-  return <AnnoncesPage mode="surveillant" />;
+  return <AnnoncesPage />;
 }

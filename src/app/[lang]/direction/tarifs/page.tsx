@@ -1,81 +1,61 @@
-// Route : /[lang]/direction/tarifs — Grille tarifaire et échéanciers (CU-DIR-04).
-import Link from "next/link";
+// Route : /[lang]/direction/tarifs — Frais de scolarité par niveau et échéance (CU-DIR-04).
 import { getLang, getT } from "@/lib/i18n/server";
 import { dateCourte, fcfa } from "@/lib/format";
-import { premier } from "@/lib/utils";
-import { grilleTarifaire } from "@/features/finances/queries";
-import { RemiseForm, TarifForm } from "@/features/finances/components/tarif-forms";
+import { anneeCourante, classes as lireClasses, frais as lireFrais } from "@/lib/api/backend";
+import { creerFrais } from "@/features/parametrage/actions";
 import { PageBody, PageHeader } from "@/components/layout/page-header";
 import { Card, CardHeader } from "@/components/ui/card";
-import { Table, Td, Th } from "@/components/ui/data-table";
-import { ButtonLink } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { LigneVide, Table, Td, Th } from "@/components/ui/data-table";
+import { Field, Input, Select } from "@/components/ui/form-field";
+import { Formulaire } from "@/components/ui/formulaire";
 
-export default async function TarifsPage({ searchParams }: PageProps<"/[lang]/direction/tarifs">) {
-  const [sp, t, lang, g] = await Promise.all([searchParams, getT(), getLang(), grilleTarifaire()]);
-  const niveau = premier(sp.niveau) ?? g.tarifs[0]?.niveau;
-  const nouveau = niveau === "__nouveau";
-  const choisi = g.tarifs.find((x) => x.niveau === niveau);
-  const base = `/${lang}/direction/tarifs`;
-
+export default async function TarifsPage() {
+  const [t, lang, annee, classes] = await Promise.all([getT(), getLang(), anneeCourante(), lireClasses()]);
+  const frais = annee ? await lireFrais(annee.id) : [];
+  const niveaux = [...new Set([...classes.map((c) => c.niveau), ...frais.map((f) => f.niveau)])].sort();
   return (
     <>
-      <PageHeader
-        titre={t("Grille tarifaire et échéanciers", "Fee schedule and instalments")}
-        sousTitre={t("Les montants s'appliquent à tous les élèves du niveau pour l'année 2026-2027.", "Amounts apply to all students of the level for 2026-2027.")}
-      />
+      <PageHeader titre={t("Frais de scolarité", "School fees")} sousTitre={annee ? t(`Année ${annee.libelle} · appliqués aux élèves selon le niveau de leur classe`, `Year ${annee.libelle} · applied to students by class level`) : undefined} />
       <PageBody>
-        <div className="grid gap-6 xl:grid-cols-[3fr_2fr]">
-          <Card>
-            <CardHeader titre={t("Frais par niveau", "Fees per level")} action={<ButtonLink href={`${base}?niveau=__nouveau`} variante="secondaire" taille="sm">{t("Ajouter un niveau", "Add a level")}</ButtonLink>} />
-            <Table>
-              <thead>
-                <tr>
-                  <Th>{t("Niveau", "Level")}</Th>
-                  <Th>{t("Frais annuels", "Annual fees")}</Th>
-                  <Th>{t("Échéancier", "Schedule")}</Th>
-                  <Th>{t("Élèves", "Students")}</Th>
-                  <Th />
-                </tr>
-              </thead>
-              <tbody>
-                {g.tarifs.map((x) => (
-                  <tr key={x.niveau} className={x.niveau === niveau ? "bg-navy-50/50" : ""}>
-                    <Td className="font-semibold">{x.niveau}</Td>
-                    <Td>{fcfa(x.montant, lang)}</Td>
-                    <Td>{t(`${x.versements.length} versements`, `${x.versements.length} instalments`)}</Td>
-                    <Td>{x.eleves}</Td>
-                    <Td className="text-right">
-                      <Link href={`${base}?niveau=${encodeURIComponent(x.niveau)}`} scroll={false} className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-navy-700 hover:bg-navy-50">
-                        {t("Modifier", "Edit")}
-                      </Link>
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </Card>
-          <div className="space-y-6">
-            <Card>
-              <CardHeader
-                titre={nouveau ? t("Nouveau niveau", "New level") : `${t("Échéancier", "Schedule")} · ${niveau}`}
-                sousTitre={choisi ? choisi.versements.map((v) => `${v.libelle} : ${fcfa(v.montant, lang)} ${t("avant le", "before")} ${dateCourte(v.dateLimite, lang)}`).join(" · ") : undefined}
-              />
-              <TarifForm key={niveau} tarif={choisi} nouveau={nouveau} />
-            </Card>
-            <Card>
-              <CardHeader titre={t("Remises", "Discounts")} sousTitre={t("Appliquées par la comptabilité sur le dossier financier de l'élève.", "Applied by accounting on the student's account.")} />
-              <ul className="mb-4 divide-y divide-line">
-                {g.remises.map((r) => (
-                  <li key={r.id} className="flex justify-between py-2 text-sm">
-                    {r.libelle}
-                    <strong>{r.taux} %</strong>
-                  </li>
-                ))}
-              </ul>
-              <RemiseForm />
+        {!annee ? (
+          <EmptyState titre={t("Aucune année scolaire courante", "No current school year")} />
+        ) : (
+          <div className="grid gap-6 xl:grid-cols-[3fr_2fr]">
+            <div className="space-y-6">
+              {niveaux.length === 0 && <EmptyState titre={t("Aucun frais défini", "No fee defined")} />}
+              {niveaux.map((n) => {
+                const lignes = frais.filter((f) => f.niveau === n).sort((a, b) => a.dateEcheance.localeCompare(b.dateEcheance));
+                const total = lignes.reduce((s, f) => s + Number(f.montant), 0);
+                return (
+                  <Card key={n}>
+                    <CardHeader titre={t(`Niveau ${n}`, `Level ${n}`)} sousTitre={t(`Total annuel : ${fcfa(total, lang)}`, `Yearly total: ${fcfa(total, lang)}`)} />
+                    <Table>
+                      <thead><tr><Th>{t("Libellé", "Label")}</Th><Th>{t("Montant", "Amount")}</Th><Th>{t("Échéance", "Due date")}</Th></tr></thead>
+                      <tbody>
+                        {lignes.length === 0 && <LigneVide colSpan={3} texte={t("Aucun frais pour ce niveau.", "No fee for this level.")} />}
+                        {lignes.map((f) => (
+                          <tr key={f.id}><Td className="font-semibold">{f.libelle}</Td><Td>{fcfa(Number(f.montant), lang)}</Td><Td className="text-muted">{dateCourte(f.dateEcheance, lang)}</Td></tr>
+                        ))}
+                      </tbody>
+                    </Table>
+                  </Card>
+                );
+              })}
+            </div>
+            <Card className="h-fit">
+              <CardHeader titre={t("Ajouter un versement", "Add an instalment")} />
+              <Formulaire action={creerFrais.bind(null, annee.id)} libelle={t("Enregistrer", "Save")}>
+                <Field label={t("Niveau", "Level")}><Select name="niveau" options={niveaux.map((n) => ({ value: n, label: n }))} /></Field>
+                <Field label={t("Libellé", "Label")}><Input name="libelle" placeholder={t("1re tranche", "1st instalment")} required /></Field>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label={t("Montant (FCFA)", "Amount (FCFA)")}><Input name="montant" inputMode="numeric" required /></Field>
+                  <Field label={t("Échéance", "Due date")}><Input type="date" name="dateEcheance" required /></Field>
+                </div>
+              </Formulaire>
             </Card>
           </div>
-        </div>
+        )}
       </PageBody>
     </>
   );

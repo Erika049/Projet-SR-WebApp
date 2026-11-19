@@ -1,91 +1,83 @@
-// Route : /[lang]/direction/parametrage — Année scolaire, trimestres et séquences (CU-DIR-02).
+// Route : /[lang]/direction/parametrage — Année scolaire et périodes (séquences, trimestres), ouverture de la saisie des notes.
 import { getLang, getT } from "@/lib/i18n/server";
-import { dateCourte, jourMois } from "@/lib/format";
-import { STATUT_PERIODE, lib, ton } from "@/lib/labels";
-import { parametrage } from "@/features/parametrage/queries";
-import { cloturerAnnee, modifierSequence, modifierTrimestre } from "@/features/parametrage/actions";
-import { AnneeForm, PeriodeForm } from "@/features/parametrage/components/forms";
+import { dateCourte } from "@/lib/format";
+import { annees as lireAnnees, periodes as lirePeriodes } from "@/lib/api/backend";
+import { basculerSaisie, creerAnnee, creerPeriode } from "@/features/parametrage/actions";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Table, Td, Th } from "@/components/ui/data-table";
-import { Dialog } from "@/components/ui/dialog";
 import { ActionButton } from "@/components/ui/action-button";
-import { Button } from "@/components/ui/button";
+import { LigneVide, Table, Td, Th } from "@/components/ui/data-table";
+import { Field, Input, Select } from "@/components/ui/form-field";
+import { Formulaire } from "@/components/ui/formulaire";
 
-export default async function ParametrageAnneePage() {
-  const [t, lang, p] = await Promise.all([getT(), getLang(), parametrage()]);
+export default async function AnneePage() {
+  const [t, lang, annees] = await Promise.all([getT(), getLang(), lireAnnees()]);
+  const courante = annees.find((a) => a.courante) ?? null;
+  const periodes = courante ? await lirePeriodes(courante.id) : [];
+  const libelle = (type: string, n: number) =>
+    type === "SEQUENCE" ? t(`Séquence ${n}`, `Sequence ${n}`) : type === "TRIMESTRE" ? t(`Trimestre ${n}`, `Term ${n}`) : t("Année", "Year");
+
   return (
-    <div className="space-y-6">
-      <div className="grid gap-6 xl:grid-cols-[3fr_2fr]">
-        <Card>
-          <CardHeader titre={t("Année scolaire", "School year")} action={<Badge ton={p.annee.statut === "en_cours" ? "succes" : "navy"}>{p.annee.statut === "en_cours" ? t("En cours", "In progress") : p.annee.statut === "cloturee" ? t("Clôturée", "Closed") : t("En préparation", "Preparing")}</Badge>} />
-          <AnneeForm annee={p.annee} />
-        </Card>
-        <div className="space-y-6">
-          <Card>
-            <CardHeader titre={t("Préparer l'année suivante", "Prepare next year")} sousTitre={t(`Dupliquez la structure de ${p.annee.libelle} (classes, matières, coefficients, tarifs) pour gagner du temps.`, `Duplicate the ${p.annee.libelle} structure (classes, subjects, coefficients, fees) to save time.`)} />
-            <Button variante="secondaire" disabled title={t("Disponible en fin d'année", "Available at year end")}>{t("Préparer 2027-2028", "Prepare 2027-2028")}</Button>
-          </Card>
-          <Card>
-            <CardHeader titre={t("Clôturer l'année", "Close the year")} sousTitre={t("Fige les notes, les bulletins et les présences. Action réservée à la direction.", "Freezes marks, report cards and attendance. Management only.")} />
-            <ActionButton action={cloturerAnnee} variante="danger" taille="md" confirmation={t("Clôturer définitivement l'année ? Cette action est irréversible.", "Permanently close the year? This cannot be undone.")}>
-              {t("Clôturer l'année", "Close the year")}
-            </ActionButton>
-          </Card>
-        </div>
-      </div>
-      <div className="grid gap-6 xl:grid-cols-2">
-        <Card>
-          <CardHeader titre={t("Trimestres", "Terms")} />
-          <Table>
-            <thead>
-              <tr>
-                <Th>{t("Période", "Term")}</Th>
-                <Th>{t("Séquences", "Sequences")}</Th>
-                <Th>{t("Début", "Start")}</Th>
-                <Th>{t("Fin", "End")}</Th>
-                <Th>{t("Statut", "Status")}</Th>
-                <Th />
+    <div className="grid gap-6 xl:grid-cols-[3fr_2fr]">
+      <Card>
+        <CardHeader
+          titre={courante ? t(`Année ${courante.libelle}`, `Year ${courante.libelle}`) : t("Aucune année courante", "No current year")}
+          sousTitre={courante ? `${dateCourte(courante.dateDebut, lang)} → ${dateCourte(courante.dateFin, lang)}` : t("Créez l'année scolaire pour commencer.", "Create the school year to begin.")}
+        />
+        <Table>
+          <thead>
+            <tr>
+              <Th>{t("Période", "Term")}</Th>
+              <Th>{t("Dates", "Dates")}</Th>
+              <Th>{t("Saisie des notes", "Mark entry")}</Th>
+              <Th />
+            </tr>
+          </thead>
+          <tbody>
+            {periodes.length === 0 && <LigneVide colSpan={4} texte={t("Aucune période.", "No term.")} />}
+            {periodes.map((p) => (
+              <tr key={p.id}>
+                <Td className="font-semibold">{libelle(p.type, p.numero)}</Td>
+                <Td className="text-muted">{dateCourte(p.dateDebut, lang)} → {dateCourte(p.dateFin, lang)}</Td>
+                <Td><Badge ton={p.saisieOuverte ? "succes" : "neutre"}>{p.saisieOuverte ? t("Ouverte", "Open") : t("Fermée", "Closed")}</Badge></Td>
+                <Td>
+                  {courante && (
+                    <ActionButton action={basculerSaisie.bind(null, courante.id, p.id, !p.saisieOuverte)} variante={p.saisieOuverte ? "danger" : "succes"}>
+                      {p.saisieOuverte ? t("Fermer la saisie", "Close entry") : t("Ouvrir la saisie", "Open entry")}
+                    </ActionButton>
+                  )}
+                </Td>
               </tr>
-            </thead>
-            <tbody>
-              {p.trimestres.map((tr) => (
-                <tr key={tr.id}>
-                  <Td className="font-semibold">{t("Trimestre", "Term")} {tr.numero}</Td>
-                  <Td>{tr.numero * 2 - 1} · {tr.numero * 2}</Td>
-                  <Td>{dateCourte(tr.debut, lang)}</Td>
-                  <Td>{dateCourte(tr.fin, lang)}</Td>
-                  <Td><Badge ton={ton(STATUT_PERIODE, tr.statut)}>{lib(STATUT_PERIODE, tr.statut, t)}</Badge></Td>
-                  <Td className="text-right">
-                    <Dialog declencheur={t("Modifier", "Edit")} titre={`${t("Trimestre", "Term")} ${tr.numero}`}>
-                      <PeriodeForm action={modifierTrimestre.bind(null, tr.id)} debut={tr.debut} fin={tr.fin} statut={tr.statut} />
-                    </Dialog>
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        </Card>
-        <Card>
-          <CardHeader titre={t("Séquences et saisie des notes", "Sequences and mark entry")} />
-          <ul className="divide-y divide-line">
-            {p.sequences.map((s) => (
-              <li key={s.numero} className="flex items-center justify-between gap-3 py-2.5 text-sm">
-                <div>
-                  <p className="font-semibold">{t("Séquence", "Sequence")} {s.numero}</p>
-                  <p className="text-xs text-muted">{jourMois(s.debut, lang)} – {jourMois(s.fin, lang)}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge ton={ton(STATUT_PERIODE, s.statut)}>
-                    {s.saisieJusquau ? `${t("Saisie ouverte jusqu'au", "Entry open until")} ${jourMois(s.saisieJusquau, lang)}` : lib(STATUT_PERIODE, s.statut, t)}
-                  </Badge>
-                  <Dialog declencheur={t("Modifier", "Edit")} titre={`${t("Séquence", "Sequence")} ${s.numero}`}>
-                    <PeriodeForm action={modifierSequence.bind(null, s.numero)} debut={s.debut} fin={s.fin} statut={s.statut} sequence saisieJusquau={s.saisieJusquau} />
-                  </Dialog>
-                </div>
-              </li>
             ))}
-          </ul>
+          </tbody>
+        </Table>
+      </Card>
+      <div className="space-y-6">
+        {courante && (
+          <Card>
+            <CardHeader titre={t("Nouvelle période", "New term")} />
+            <Formulaire action={creerPeriode.bind(null, courante.id)} libelle={t("Créer la période", "Create term")}>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label={t("Type", "Type")}>
+                  <Select name="type" options={[{ value: "SEQUENCE", label: t("Séquence", "Sequence") }, { value: "TRIMESTRE", label: t("Trimestre", "Term") }]} />
+                </Field>
+                <Field label={t("Numéro", "Number")}><Input type="number" name="numero" min={1} max={6} required /></Field>
+                <Field label={t("Début", "Start")}><Input type="date" name="dateDebut" required /></Field>
+                <Field label={t("Fin", "End")}><Input type="date" name="dateFin" required /></Field>
+              </div>
+            </Formulaire>
+          </Card>
+        )}
+        <Card>
+          <CardHeader titre={t("Nouvelle année scolaire", "New school year")} />
+          <Formulaire action={creerAnnee} libelle={t("Créer l'année", "Create year")}>
+            <Field label={t("Libellé", "Label")}><Input name="libelle" placeholder="2027-2028" required /></Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label={t("Début", "Start")}><Input type="date" name="dateDebut" required /></Field>
+              <Field label={t("Fin", "End")}><Input type="date" name="dateFin" required /></Field>
+            </div>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="courante" /> {t("Année courante", "Current year")}</label>
+          </Formulaire>
         </Card>
       </div>
     </div>

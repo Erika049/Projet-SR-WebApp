@@ -1,49 +1,40 @@
-// Route : /[lang]/plateforme/etablissements/[etablissementId]/utilisateurs — Comptes web de l'établissement (CU-SAD-02).
-import { notFound } from "next/navigation";
-import { getLang, getT } from "@/lib/i18n/server";
-import { derniereConnexion } from "@/lib/format";
-import { STATUT_COMPTE, lib, ton } from "@/lib/labels";
-import { LIBELLE_ROLE } from "@/lib/auth/roles";
-import { getEtablissement } from "@/features/plateforme/queries";
-import { actionCompte } from "@/features/plateforme/actions";
-import { Card } from "@/components/ui/card";
+// Route : /[lang]/plateforme/etablissements/[etablissementId]/utilisateurs — Personnel de l'établissement (CU-SAD-02).
+import { getT } from "@/lib/i18n/server";
+import { personnel } from "@/lib/api/backend";
+import { ajouterMembre } from "@/features/personnel/actions";
+import { ROLES_PERSONNEL } from "@/features/personnel/libelles";
+import { ChampsMembre } from "@/features/personnel/components/champs-membre";
+import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { LigneVide, Table, Td, Th } from "@/components/ui/data-table";
-import { Personne } from "@/components/ui/avatar";
-import { ActionButton } from "@/components/ui/action-button";
+import { Formulaire } from "@/components/ui/formulaire";
 
-export default async function EtablissementUtilisateursPage({ params }: PageProps<"/[lang]/plateforme/etablissements/[etablissementId]/utilisateurs">) {
-  const [{ etablissementId }, t, lang] = await Promise.all([params, getT(), getLang()]);
-  const e = await getEtablissement(etablissementId);
-  if (!e) notFound();
+export default async function EtablissementPersonnelPage({ params }: PageProps<"/[lang]/plateforme/etablissements/[etablissementId]/utilisateurs">) {
+  const [{ etablissementId }, t] = await Promise.all([params, getT()]);
+  const membres = await personnel(etablissementId);
   return (
-    <Card>
-      <Table>
-        <thead>
-          <tr>
-            <Th>{t("Utilisateur", "User")}</Th>
-            <Th>{t("Rôle", "Role")}</Th>
-            <Th>{t("Statut", "Status")}</Th>
-            <Th>{t("Dernière connexion", "Last sign-in")}</Th>
-            <Th />
-          </tr>
-        </thead>
-        <tbody>
-          {e.utilisateurs.length === 0 && <LigneVide colSpan={5} texte={t("Aucun compte.", "No accounts.")} />}
-          {e.utilisateurs.map((u) => (
-            <tr key={u.id}>
-              <Td><Personne nom={`${u.civilite} ${u.prenom} ${u.nom}`} detail={u.email} /></Td>
-              <Td>{t(...LIBELLE_ROLE[u.role])}</Td>
-              <Td><Badge ton={ton(STATUT_COMPTE, u.statut)}>{lib(STATUT_COMPTE, u.statut, t)}</Badge></Td>
-              <Td className="text-muted">{derniereConnexion(u.derniereConnexion, lang)}</Td>
-              <Td className="text-right">
-                <ActionButton action={actionCompte.bind(null, u.id, "reinitialiser")}>{t("Réinitialiser", "Reset")}</ActionButton>
-              </Td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
-      <p className="mt-3 text-xs text-muted">{t("Les enseignants et les parents utilisent l'application mobile ; leurs comptes sont gérés par l'établissement.", "Teachers and parents use the mobile app; their accounts are managed by the school.")}</p>
-    </Card>
+    <div className="grid gap-6 xl:grid-cols-[3fr_2fr]">
+      <Card>
+        <Table>
+          <thead><tr><Th>{t("Nom", "Name")}</Th><Th>{t("Téléphone", "Phone")}</Th><Th>{t("Rôles", "Roles")}</Th></tr></thead>
+          <tbody>
+            {membres.length === 0 && <LigneVide colSpan={3} texte={t("Aucun membre.", "No member.")} />}
+            {membres.map((m) => (
+              <tr key={m.utilisateurId}>
+                <Td className="font-semibold">{m.prenom} {m.nom}</Td>
+                <Td className="text-muted">{m.telephone ?? m.email ?? "—"}</Td>
+                <Td><span className="flex flex-wrap gap-1">{m.roles.map((r) => <Badge key={r} ton="neutre">{t(...(ROLES_PERSONNEL[r] ?? [r, r]))}</Badge>)}</span></Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      </Card>
+      <Card className="h-fit">
+        <CardHeader titre={t("Ajouter un compte", "Add an account")} />
+        <Formulaire action={ajouterMembre.bind(null, etablissementId)} libelle={t("Créer le compte", "Create account")}>
+          <ChampsMembre />
+        </Formulaire>
+      </Card>
+    </div>
   );
 }

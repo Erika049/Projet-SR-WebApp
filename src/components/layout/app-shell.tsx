@@ -1,23 +1,20 @@
-// Coquille commune des espaces connectés : menu latéral + contenu + mention « Données d'exemple ».
+// Coquille commune des espaces connectés : menu latéral (avec les compteurs du backend) + contenu.
 import { Suspense } from "react";
 import type { Role } from "@/types/domain";
 import { requireRole } from "@/lib/auth/dal";
 import { ESPACE_PAR_ROLE } from "@/lib/auth/roles";
-import { USE_MOCK } from "@/lib/api/client";
-import { getT } from "@/lib/i18n/server";
-import { compteursMenu } from "@/features/tableaux-de-bord/queries";
+import { compteursMenu } from "@/lib/api/backend";
+import type { CleBadge } from "@/config/navigation";
 import { Sidebar } from "./sidebar";
 
 async function Coquille({ roles, children }: { roles: Role[]; children: React.ReactNode }) {
   const session = await requireRole(...roles);
-  const [badges, t] = await Promise.all([compteursMenu(session.role), getT()]);
+  // Les compteurs ne doivent jamais empêcher l'affichage de l'espace (serveur momentanément indisponible).
+  const badges = (await compteursMenu(session.role).catch(() => ({}))) as Partial<Record<CleBadge, number>>;
   return (
     <div className="flex min-h-screen flex-col lg:flex-row">
       <Sidebar espace={ESPACE_PAR_ROLE[session.role]} badges={badges} />
-      <main className="min-w-0 flex-1 pb-10">
-        {children}
-        {USE_MOCK && <p className="px-8 text-right text-xs text-muted">{t("Données d'exemple", "Sample data")}</p>}
-      </main>
+      <main className="min-w-0 flex-1 pb-10">{children}</main>
     </div>
   );
 }

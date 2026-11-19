@@ -232,12 +232,44 @@ export type Personnel = {
 
 // ---------- Vie scolaire ----------
 export type StatutPresence = "present" | "absent" | "retard";
+/** Notification envoyée au parent pour une absence ou un retard (Presence_eleve.notifie_le). */
+export type NotificationParent = {
+  statut: "envoyee" | "lue" | "echec";
+  canal: "push" | "sms";
+  le: string;
+  relances: number;
+  motifEchec: string | null;
+};
+
+/** Séance d'appel d'une classe, faite par l'enseignant sur le mobile ou par la surveillance. */
 export type Appel = {
   id: string;
   classeId: string;
   date: string;
+  /** Enseignant du cours (null si l'appel est fait par la surveillance). */
+  enseignantId: string | null;
   realisePar: string;
+  matiere: string;
+  heureDebut: string;
+  heureFin: string;
+  /** Heure de saisie de l'appel. */
+  saisiA: string;
+  source: "mobile" | "surveillance";
   statuts: Record<string, StatutPresence>;
+  /** Notifications envoyées aux parents des élèves absents ou en retard, par élève. */
+  notifications: Record<string, NotificationParent>;
+};
+
+/** Absence ou retard du jour, consolidé à partir des appels (vue du surveillant général). */
+export type AbsenceDuJour = {
+  appelId: string;
+  eleve: Eleve;
+  classe: Classe;
+  statut: "absent" | "retard";
+  appel: Pick<Appel, "realisePar" | "matiere" | "heureDebut" | "heureFin" | "saisiA" | "source">;
+  notification: NotificationParent | null;
+  justification: "aucune" | "en_attente" | "acceptee";
+  aRelancer: boolean;
 };
 
 export type Justificatif = {

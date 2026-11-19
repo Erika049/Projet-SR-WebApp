@@ -1,90 +1,61 @@
-// Route : /[lang]/direction/personnel — Personnel (CU-DIR-03, CU-SEC-09).
+// Route : /[lang]/direction/personnel — Personnel de l'établissement et affectations des enseignants (CU-DIR-03).
 import Link from "next/link";
-import { Briefcase, ShieldCheck, UserPlus, Users } from "lucide-react";
+import { UserPlus } from "lucide-react";
 import { getLang, getT } from "@/lib/i18n/server";
-import { numeroPage, texteRecherche } from "@/lib/api/pagination";
-import { FONCTION, STATUT_COMPTE, lib, ton } from "@/lib/labels";
-import { nomCivil, premier } from "@/lib/utils";
-import { listerPersonnel } from "@/features/personnel/queries";
+import { affectations as lireAffectations, classes as lireClasses, matieres as lireMatieres, personnel } from "@/lib/api/backend";
+import { creerAffectation } from "@/features/personnel/actions";
+import { ROLES_PERSONNEL } from "@/features/personnel/libelles";
 import { PageBody, PageHeader } from "@/components/layout/page-header";
-import { GrilleStats, StatCard } from "@/components/ui/stat-card";
-import { Card } from "@/components/ui/card";
+import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ButtonLink } from "@/components/ui/button";
-import { LigneVide, Pagination, Table, Td, Th } from "@/components/ui/data-table";
-import { Tabs } from "@/components/ui/tabs";
-import { Personne } from "@/components/ui/avatar";
-import { SearchInput } from "@/components/ui/search-input";
+import { LigneVide, Table, Td, Th } from "@/components/ui/data-table";
+import { Field, Select } from "@/components/ui/form-field";
+import { Formulaire } from "@/components/ui/formulaire";
 
-export default async function PersonnelPage({ searchParams }: PageProps<"/[lang]/direction/personnel">) {
-  const [sp, t, lang] = await Promise.all([searchParams, getT(), getLang()]);
-  const categorie = premier(sp.categorie);
-  const q = texteRecherche(sp.q);
-  const p = await listerPersonnel({ categorie, q, page: numeroPage(sp.page) });
-  const base = `/${lang}/direction/personnel`;
+export default async function PersonnelPage() {
+  const [t, lang, membres, affectations, classes, matieres] = await Promise.all([getT(), getLang(), personnel(), lireAffectations(), lireClasses(), lireMatieres()]);
+  const enseignants = membres.filter((m) => m.roles.includes("ENSEIGNANT"));
   return (
     <>
       <PageHeader
         titre={t("Personnel", "Staff")}
-        sousTitre={t(`${p.compteurs.tous} membres du personnel · Année 2026-2027`, `${p.compteurs.tous} staff members · Year 2026-2027`)}
+        sousTitre={t(`${membres.length} membres · ${enseignants.length} enseignants`, `${membres.length} members · ${enseignants.length} teachers`)}
         actions={
-          <>
-            <ButtonLink href={`/api/exports/personnel?lang=${lang}`} variante="secondaire" prefetch={false}>{t("Exporter", "Export")}</ButtonLink>
-            <ButtonLink href={`${base}/nouveau`}><UserPlus className="size-4" /> {t("Ajouter un membre", "Add a member")}</ButtonLink>
-          </>
+          <Link href={`/${lang}/direction/personnel/nouveau`} className="inline-flex items-center gap-2 rounded-lg bg-navy-700 px-4 py-2 text-sm font-semibold text-white">
+            <UserPlus className="size-4" /> {t("Ajouter un membre", "Add a member")}
+          </Link>
         }
       />
       <PageBody>
-        <GrilleStats>
-          <StatCard libelle={t("Personnel", "Staff")} valeur={p.compteurs.tous} detail={t("Tous rôles confondus", "All roles")} icone={<Users className="size-5" />} />
-          <StatCard libelle={t("Enseignants", "Teachers")} valeur={p.compteurs.enseignant} detail={t(`${p.compteurs.matieres} matières`, `${p.compteurs.matieres} subjects`)} icone={<Briefcase className="size-5" />} ton="succes" />
-          <StatCard libelle={t("Administration", "Administration")} valeur={p.compteurs.administration} detail={t("Direction, secrétariat, comptabilité", "Management, secretariat, accounting")} icone={<ShieldCheck className="size-5" />} />
-          <StatCard libelle={t("Surveillance", "Discipline")} valeur={p.compteurs.surveillance} detail={t("Surveillants et surveillant général", "Supervisors and head of discipline")} icone={<ShieldCheck className="size-5" />} ton="alerte" />
-        </GrilleStats>
         <Card>
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <Tabs
-              onglets={[
-                { href: base, libelle: t("Tous", "All"), compteur: p.compteurs.tous },
-                { href: `${base}?categorie=enseignant`, libelle: t("Enseignants", "Teachers"), compteur: p.compteurs.enseignant },
-                { href: `${base}?categorie=administration`, libelle: t("Administration", "Administration"), compteur: p.compteurs.administration },
-                { href: `${base}?categorie=surveillance`, libelle: t("Surveillance", "Discipline"), compteur: p.compteurs.surveillance },
-              ]}
-            />
-            <SearchInput defaut={q} placeholder={t("Nom, matricule, matière…", "Name, ID, subject…")} conserver={{ categorie }} libelleBouton={t("Rechercher", "Search")} />
-          </div>
           <Table>
             <thead>
-              <tr>
-                <Th>{t("Matricule", "ID")}</Th>
-                <Th>{t("Nom", "Name")}</Th>
-                <Th>{t("Fonction", "Role")}</Th>
-                <Th>{t("Spécialité", "Specialty")}</Th>
-                <Th>{t("Classes", "Classes")}</Th>
-                <Th>{t("Statut", "Status")}</Th>
-                <Th />
-              </tr>
+              <tr><Th>{t("Nom", "Name")}</Th><Th>{t("Téléphone", "Phone")}</Th><Th>{t("Rôles", "Roles")}</Th><Th>{t("Classes", "Classes")}</Th></tr>
             </thead>
             <tbody>
-              {p.items.length === 0 && <LigneVide colSpan={7} texte={t("Aucun résultat.", "No results.")} />}
-              {p.items.map((m) => (
-                <tr key={m.id}>
-                  <Td className="font-mono text-xs">{m.matricule}</Td>
-                  <Td><Personne nom={nomCivil(m)} /></Td>
-                  <Td>{lib(FONCTION, m.fonction, t)}</Td>
-                  <Td className="text-muted">{m.specialite}</Td>
-                  <Td className="text-muted">{m.fonction === "surveillant_general" ? t("Toutes les classes", "All classes") : m.classes.join(", ") || "—"}</Td>
-                  <Td><Badge ton={ton(STATUT_COMPTE, m.statut)}>{lib(STATUT_COMPTE, m.statut, t)}</Badge></Td>
-                  <Td className="text-right">
-                    <Link href={`${base}/${m.id}`} className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-navy-700 hover:bg-navy-50">
-                      {t("Voir la fiche", "View profile")}
-                    </Link>
+              {membres.length === 0 && <LigneVide colSpan={4} texte={t("Aucun membre.", "No member.")} />}
+              {membres.map((m) => (
+                <tr key={m.utilisateurId}>
+                  <Td><Link href={`/${lang}/direction/personnel/${m.utilisateurId}`} className="font-semibold text-navy-700 hover:underline">{m.prenom} {m.nom}</Link></Td>
+                  <Td className="text-muted">{m.telephone ?? m.email ?? "—"}</Td>
+                  <Td><span className="flex flex-wrap gap-1">{m.roles.map((r) => <Badge key={r} ton="neutre">{t(...(ROLES_PERSONNEL[r] ?? [r, r]))}</Badge>)}</span></Td>
+                  <Td className="text-muted">
+                    {affectations.filter((a) => a.enseignantId === m.utilisateurId).map((a) => `${a.classeNom} (${a.matiereNom})`).join(", ") || "—"}
                   </Td>
                 </tr>
               ))}
             </tbody>
           </Table>
-          <Pagination page={p.page} total={p.total} taille={p.taille} base={base} params={{ categorie, q: q || undefined }} t={t} />
+        </Card>
+        <Card className="max-w-2xl">
+          <CardHeader titre={t("Affecter un enseignant", "Assign a teacher")} sousTitre={t("L'enseignant retrouve la classe dans l'application mobile (appel, notes).", "The teacher finds the class in the mobile app (roll call, marks).")} />
+          <Formulaire action={creerAffectation} libelle={t("Affecter", "Assign")}>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Field label={t("Enseignant", "Teacher")}><Select name="enseignantId" vide={t("Choisir…", "Choose…")} options={enseignants.map((m) => ({ value: m.utilisateurId, label: `${m.prenom} ${m.nom}` }))} /></Field>
+              <Field label={t("Classe", "Class")}><Select name="classeId" vide={t("Choisir…", "Choose…")} options={classes.map((c) => ({ value: c.id, label: c.nom }))} /></Field>
+              <Field label={t("Matière", "Subject")}><Select name="matiereId" vide={t("Choisir…", "Choose…")} options={matieres.map((m) => ({ value: m.id, label: m.nom }))} /></Field>
+            </div>
+          </Formulaire>
         </Card>
       </PageBody>
     </>

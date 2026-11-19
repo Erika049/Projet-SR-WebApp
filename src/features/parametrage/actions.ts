@@ -1,95 +1,95 @@
 "use server";
-// CU-DIR-02 : paramétrer l'année scolaire, les périodes, les classes, les matières, le calendrier, l'évaluation.
+// Direction : paramétrage de l'année (périodes, classes, matières, frais, emploi du temps) — CU-DIR-02, CU-DIR-04.
 import { refresh } from "next/cache";
-import { ecrire } from "@/lib/api/client";
+import * as b from "@/lib/api/backend";
 import { messageErreur } from "@/lib/api/errors";
 import { exigerRole } from "@/lib/auth/dal";
 import { getLangAction, getTAction } from "@/lib/i18n/server";
-import { echec, erreursZod, lireFormulaire, type EtatFormulaire } from "@/lib/actions";
-import * as m from "@/lib/api/mock/scolarite";
-import type { Sequence, Trimestre } from "@/types/domain";
-import { schemaAnnee, schemaClasse, schemaEvaluation, schemaEvenement, schemaMatiere, schemaPeriode } from "./schemas";
+import { echec, type EtatFormulaire } from "@/lib/actions";
 
-async function executer<T>(fn: () => Promise<T>, succes: [string, string]): Promise<EtatFormulaire> {
-  const t = await getTAction();
+const v = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+async function executer(operation: () => Promise<unknown>, succes: string): Promise<EtatFormulaire> {
   try {
-    await fn();
+    await operation();
     refresh();
-    return { ok: true, message: t(...succes) };
+    return { ok: true, message: succes };
   } catch (e) {
     return echec(messageErreur(e, await getLangAction()));
   }
 }
 
-const invalide = async (erreurs: Record<string, string>) => echec((await getTAction())("Vérifiez les champs signalés.", "Please check the highlighted fields."), erreurs);
-
-export async function enregistrerAnnee(_: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
-  const s = await exigerRole("direction");
-  const res = schemaAnnee.safeParse(lireFormulaire(fd));
-  if (!res.success) return invalide(erreursZod(res.error));
-  return executer(() => ecrire(() => m.enregistrerAnnee(res.data, s.nomAffiche), "/parametrage/annee", "PUT", res.data), ["Année enregistrée.", "School year saved."]);
+export async function creerAnnee(_: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
+  await exigerRole("direction");
+  const t = await getTAction();
+  const data = { libelle: v(fd, "libelle"), dateDebut: v(fd, "dateDebut"), dateFin: v(fd, "dateFin"), courante: fd.get("courante") === "on" };
+  if (!data.libelle || !DATE.test(data.dateDebut) || !DATE.test(data.dateFin)) return echec(t("Libellé et dates obligatoires.", "Label and dates required."));
+  return executer(() => b.creerAnnee(data), t("Année scolaire créée.", "School year created."));
 }
 
-export async function modifierTrimestre(id: string, _: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
-  const s = await exigerRole("direction");
-  const res = schemaPeriode.safeParse(lireFormulaire(fd));
-  if (!res.success) return invalide(erreursZod(res.error));
-  const data = { ...res.data, statut: res.data.statut as Trimestre["statut"] };
-  return executer(() => ecrire(() => m.modifierTrimestre(id, data, s.nomAffiche), `/parametrage/trimestres/${id}`, "PUT", data), ["Période enregistrée.", "Term saved."]);
+export async function creerPeriode(anneeId: string, _: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
+  await exigerRole("direction");
+  const t = await getTAction();
+  const data = { type: v(fd, "type"), numero: Number(v(fd, "numero")), dateDebut: v(fd, "dateDebut"), dateFin: v(fd, "dateFin") };
+  if (!["SEQUENCE", "TRIMESTRE"].includes(data.type) || !(data.numero >= 1) || !DATE.test(data.dateDebut) || !DATE.test(data.dateFin)) {
+    return echec(t("Type, numéro et dates obligatoires.", "Type, number and dates required."));
+  }
+  return executer(() => b.creerPeriode(anneeId, data), t("Période créée.", "Period created."));
 }
 
-export async function modifierSequence(numero: number, _: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
-  const s = await exigerRole("direction");
-  const v = lireFormulaire(fd) as Record<string, string>;
-  const res = schemaPeriode.safeParse(v);
-  if (!res.success) return invalide(erreursZod(res.error));
-  const data = { debut: res.data.debut, fin: res.data.fin, statut: res.data.statut as Sequence["statut"], saisieJusquau: v.saisieJusquau || null };
-  return executer(() => ecrire(() => m.modifierSequence(numero, data, s.nomAffiche), `/parametrage/sequences/${numero}`, "PUT", data), ["Séquence enregistrée.", "Sequence saved."]);
-}
-
-export async function creerClasse(_: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
-  const s = await exigerRole("direction");
-  const res = schemaClasse.safeParse(lireFormulaire(fd));
-  if (!res.success) return invalide(erreursZod(res.error));
-  return executer(() => ecrire(() => m.creerClasse(res.data, s.nomAffiche), "/classes", "POST", res.data), ["Classe créée.", "Class created."]);
-}
-
-export async function modifierClasse(id: string, _: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
-  const s = await exigerRole("direction");
-  const data = { capacite: Number(fd.get("capacite")) || 60, titulaireId: String(fd.get("titulaireId") ?? "") || null };
-  return executer(() => ecrire(() => m.modifierClasse(id, data, s.nomAffiche), `/classes/${id}`, "PUT", data), ["Classe modifiée.", "Class updated."]);
-}
-
-export async function enregistrerMatiere(_: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
-  const s = await exigerRole("direction");
-  const res = schemaMatiere.safeParse(lireFormulaire(fd));
-  if (!res.success) return invalide(erreursZod(res.error));
-  const data = { ...res.data, groupe: res.data.groupe as 1 | 2 | 3, id: res.data.id || undefined };
-  return executer(() => ecrire(() => m.enregistrerMatiere(data, s.nomAffiche), "/matieres", "PUT", data), ["Matière enregistrée.", "Subject saved."]);
-}
-
-export async function ajouterEvenement(_: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
-  const s = await exigerRole("direction");
-  const res = schemaEvenement.safeParse(lireFormulaire(fd));
-  if (!res.success) return invalide(erreursZod(res.error));
-  return executer(() => ecrire(() => m.ajouterEvenement(res.data, s.nomAffiche), "/calendrier", "POST", res.data), ["Événement ajouté.", "Event added."]);
-}
-
-export async function supprimerEvenement(id: string) {
-  const s = await exigerRole("direction");
-  await ecrire(() => m.supprimerEvenement(id, s.nomAffiche), `/calendrier/${id}`, "DELETE");
+export async function basculerSaisie(anneeId: string, periodeId: string, ouvrir: boolean) {
+  await exigerRole("direction");
+  await b.basculerSaisie(anneeId, periodeId, ouvrir);
   refresh();
 }
 
-export async function enregistrerEvaluation(_: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
-  const s = await exigerRole("direction");
-  const res = schemaEvaluation.safeParse(lireFormulaire(fd));
-  if (!res.success) return invalide(erreursZod(res.error));
-  return executer(() => ecrire(() => m.enregistrerEvaluation(res.data, s.nomAffiche), "/parametrage/evaluation", "PUT", res.data), ["Paramètres enregistrés.", "Settings saved."]);
+export async function creerClasse(anneeId: string, _: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
+  await exigerRole("direction", "secretariat");
+  const t = await getTAction();
+  const max = Number(v(fd, "effectifMax"));
+  const data = { anneeScolaireId: anneeId, nom: v(fd, "nom"), niveau: v(fd, "niveau"), effectifMax: max > 0 ? max : null };
+  if (!data.nom || !data.niveau) return echec(t("Nom et niveau obligatoires.", "Name and level required."));
+  return executer(() => b.creerClasse(data), t(`Classe ${data.nom} créée.`, `Class ${data.nom} created.`));
 }
 
-export async function cloturerAnnee() {
-  const s = await exigerRole("direction");
-  await ecrire(() => m.cloturerAnnee(s.nomAffiche), "/parametrage/annee/cloturer", "POST");
+export async function creerMatiere(_: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
+  await exigerRole("direction");
+  const t = await getTAction();
+  const data = { nom: v(fd, "nom"), code: v(fd, "code").toUpperCase(), coefficientDefaut: Number(v(fd, "coefficient").replace(",", ".")) };
+  if (!data.nom || !data.code || !(data.coefficientDefaut > 0)) return echec(t("Nom, code et coefficient obligatoires.", "Name, code and coefficient required."));
+  return executer(() => b.creerMatiere(data), t(`Matière ${data.nom} créée.`, `Subject ${data.nom} created.`));
+}
+
+export async function creerFrais(anneeId: string, _: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
+  await exigerRole("direction");
+  const t = await getTAction();
+  const data = { niveau: v(fd, "niveau"), libelle: v(fd, "libelle"), montant: Number(v(fd, "montant").replace(/\s/g, "")), dateEcheance: v(fd, "dateEcheance") };
+  if (!data.niveau || !data.libelle || !(data.montant >= 0) || !DATE.test(data.dateEcheance)) {
+    return echec(t("Niveau, libellé, montant et échéance obligatoires.", "Level, label, amount and due date required."));
+  }
+  return executer(() => b.creerFrais(anneeId, data), t("Frais enregistrés.", "Fee saved."));
+}
+
+export async function creerCreneau(_: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
+  await exigerRole("direction");
+  const t = await getTAction();
+  const data = {
+    classeId: v(fd, "classeId"),
+    matiereId: v(fd, "matiereId"),
+    jourSemaine: Number(v(fd, "jourSemaine")),
+    heureDebut: v(fd, "heureDebut"),
+    heureFin: v(fd, "heureFin"),
+    salle: v(fd, "salle") || null,
+  };
+  if (!data.classeId || !data.matiereId || !(data.jourSemaine >= 1 && data.jourSemaine <= 6) || !data.heureDebut || !data.heureFin) {
+    return echec(t("Classe, matière, jour et heures obligatoires.", "Class, subject, day and times required."));
+  }
+  return executer(() => b.creerCreneau(data), t("Cours ajouté à l'emploi du temps.", "Lesson added to the timetable."));
+}
+
+export async function supprimerCreneau(id: string) {
+  await exigerRole("direction");
+  await b.supprimerCreneau(id);
   refresh();
 }

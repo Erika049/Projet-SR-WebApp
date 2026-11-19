@@ -10,7 +10,8 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import type { StatutPresence } from "@/types/domain";
 import { aujourdhuiIso } from "@/lib/format";
 
-type Ligne = { id: string; nom: string; matricule: string; statut: StatutPresence };
+/** [notifie] : les parents ont déjà été prévenus de l'absence ou du retard. */
+type Ligne = { id: string; nom: string; matricule: string; statut: StatutPresence; notifie?: boolean };
 
 export function AppelForm({ classeId, lignes }: { classeId: string; lignes: Ligne[] }) {
   const t = useT();
@@ -80,7 +81,14 @@ export function AppelForm({ classeId, lignes }: { classeId: string; lignes: Lign
           <li key={l.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
             <div className="text-sm">
               <p className="font-semibold">{l.nom}</p>
-              <p className="text-xs text-muted">{l.matricule}</p>
+              <p className="text-xs text-muted">
+                {l.matricule}
+                {l.statut !== "present" && statuts[l.id] === l.statut && (
+                  <span className={l.notifie ? "ml-2 text-brand-700" : "ml-2 font-semibold text-amber-700"}>
+                    {l.notifie ? t("· parents prévenus", "· parents notified") : t("· parents pas encore prévenus", "· parents not notified yet")}
+                  </span>
+                )}
+              </p>
             </div>
             <input type="hidden" name={`statut_${l.id}`} value={statuts[l.id]} />
             <div className="flex gap-1.5">

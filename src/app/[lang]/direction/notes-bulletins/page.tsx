@@ -1,73 +1,47 @@
-// Route : /[lang]/direction/notes-bulletins — Notes et bulletins (CU-DIR-05). Bascule Séquences / Trimestres via ?vue=.
+// Route : /[lang]/direction/notes-bulletins — Résultats par classe (moyennes saisies par les enseignants).
+import Link from "next/link";
 import { getLang, getT } from "@/lib/i18n/server";
-import { dateCourte, jourMois } from "@/lib/format";
-import { premier } from "@/lib/utils";
-import { suiviBulletins } from "@/features/notes-bulletins/queries";
-import { BulletinsTable } from "@/features/notes-bulletins/components/bulletins-table";
+import { classes as lireClasses, resultats } from "@/lib/api/backend";
 import { PageBody, PageHeader } from "@/components/layout/page-header";
-import { Card, CardHeader, Note } from "@/components/ui/card";
-import { Tabs } from "@/components/ui/tabs";
-import { StatCard } from "@/components/ui/stat-card";
-import { Badge } from "@/components/ui/badge";
-import { ButtonLink } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { LigneVide, Table, Td, Th } from "@/components/ui/data-table";
 
-export default async function NotesBulletinsPage({ searchParams }: PageProps<"/[lang]/direction/notes-bulletins">) {
-  const [sp, t, lang] = await Promise.all([searchParams, getT(), getLang()]);
-  const vue = premier(sp.vue) === "trimestre" ? "trimestre" : "sequence";
-  const n = Math.min(vue === "sequence" ? 6 : 3, Math.max(1, Number(premier(sp.n)) || 1));
-  const s = await suiviBulletins(vue, n);
-  const base = `/${lang}/direction/notes-bulletins`;
-  const libelle = vue === "sequence" ? t(`Séquence ${n}`, `Sequence ${n}`) : t(`Trimestre ${n}`, `Term ${n}`);
-
+export default async function NotesPage() {
+  const [t, lang, classes] = await Promise.all([getT(), getLang(), lireClasses()]);
+  const parClasse = await Promise.all(classes.map(async (c) => ({ c, r: await resultats(c.id) })));
   return (
     <>
-      <PageHeader
-        titre={t("Notes et bulletins", "Marks and report cards")}
-        sousTitre={t("Un bulletin n'est visible par les parents qu'après validation et publication par la direction.", "A report card is visible to parents only after approval and publication by management.")}
-        actions={
-          s.sequence?.saisieJusquau ? (
-            <Badge ton="succes">{t("Saisie ouverte jusqu'au", "Entry open until")} {jourMois(s.sequence.saisieJusquau, lang)}</Badge>
-          ) : s.sequence?.statut === "cloturee" ? (
-            <Badge ton="navy">{t("Saisie clôturée", "Entry closed")}</Badge>
-          ) : null
-        }
-      />
+      <PageHeader titre={t("Notes et résultats", "Marks and results")} sousTitre={t("Moyennes de l'année calculées à partir des notes saisies par les enseignants.", "Yearly averages computed from the marks entered by teachers.")} />
       <PageBody>
-        <div className="flex flex-wrap items-center gap-3">
-          <Tabs
-            onglets={[
-              { href: base, libelle: t("Séquences", "Sequences") },
-              { href: `${base}?vue=trimestre`, libelle: t("Trimestres", "Terms") },
-            ]}
-          />
-          <Tabs
-            onglets={Array.from({ length: vue === "sequence" ? 6 : 3 }, (_, i) => ({
-              href: i === 0 ? (vue === "sequence" ? base : `${base}?vue=trimestre`) : `${base}?vue=${vue}&n=${i + 1}`,
-              libelle: vue === "sequence" ? `S${i + 1}` : `T${i + 1}`,
-            }))}
-          />
-        </div>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <StatCard libelle={t("Notes saisies", "Marks entered")} valeur={`${s.progression} %`} detail={libelle} ton="succes" />
-          <StatCard libelle={t("Bulletins validés ou publiés", "Approved or published")} valeur={`${s.validesOuPublies} / ${s.lignes.length}`} detail={t("classes", "classes")} />
-          <StatCard libelle={t("À traiter", "To handle")} valeur={s.aValider} detail={t(`${s.aValider} à valider · ${s.incomplets} avec notes incomplètes`, `${s.aValider} to approve · ${s.incomplets} incomplete`)} ton="alerte" />
-        </div>
         <Card>
-          <CardHeader
-            titre={`${t("Classes", "Classes")} · ${libelle}`}
-            sousTitre={s.sequence ? `${dateCourte(s.sequence.debut, lang)} – ${dateCourte(s.sequence.fin, lang)}` : undefined}
-            action={<ButtonLink href={`/api/exports/bulletins?lang=${lang}&vue=${vue}&n=${n}`} variante="secondaire" taille="sm" prefetch={false}>{t("Exporter la liste", "Export list")}</ButtonLink>}
-          />
-          <BulletinsTable lignes={s.lignes.map((l) => ({ classe: { id: l.classe.id, libelle: l.classe.libelle }, progression: l.progression, statut: l.statut }))} sequence={n} actions={vue === "sequence"} />
+          <Table>
+            <thead>
+              <tr>
+                <Th>{t("Classe", "Class")}</Th>
+                <Th>{t("Élèves notés", "Students with marks")}</Th>
+                <Th>{t("Matières notées", "Subjects with marks")}</Th>
+                <Th>{t("Moyenne de classe", "Class average")}</Th>
+                <Th>{t("Réussite (≥ 10)", "Pass rate (≥ 10)")}</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {parClasse.length === 0 && <LigneVide colSpan={5} texte={t("Aucune classe.", "No class.")} />}
+              {parClasse.map(({ c, r }) => {
+                const notes = r.eleves.map((e) => e.moyenneGenerale).filter((m): m is number => m !== null).map(Number);
+                const moyenne = notes.length ? notes.reduce((s, m) => s + m, 0) / notes.length : null;
+                return (
+                  <tr key={c.id}>
+                    <Td><Link href={`/${lang}/direction/notes-bulletins/${c.id}`} className="font-semibold text-navy-700 hover:underline">{c.nom}</Link></Td>
+                    <Td>{notes.length} / {r.eleves.length}</Td>
+                    <Td>{r.matieres.length}</Td>
+                    <Td className="font-semibold">{moyenne === null ? "—" : moyenne.toFixed(2)}</Td>
+                    <Td>{notes.length ? `${Math.round((notes.filter((m) => m >= 10).length / notes.length) * 100)} %` : "—"}</Td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </Table>
         </Card>
-        {vue === "trimestre" && (
-          <Note>
-            {t(
-              "Le bulletin trimestriel est calculé à partir des deux séquences du trimestre. Validez et publiez chaque séquence depuis l'onglet « Séquences ».",
-              "The term report is computed from the term's two sequences. Approve and publish each sequence from the “Sequences” tab.",
-            )}
-          </Note>
-        )}
       </PageBody>
     </>
   );

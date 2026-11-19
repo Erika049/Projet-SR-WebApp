@@ -1,110 +1,68 @@
-// Route : /[lang]/direction/finances — Rapports financiers (CU-DIR-07) + validation des annulations de paiement.
+// Route : /[lang]/direction/finances — Encaissements du mois, impayés et paiements récents (CU-DIR-07).
 import { getLang, getT } from "@/lib/i18n/server";
-import { fcfa, jourMois, millions, moisCourt, nombre } from "@/lib/format";
+import { aujourdhuiIso, dateCourte, fcfa } from "@/lib/format";
 import { MODE_PAIEMENT, lib } from "@/lib/labels";
-import { annulationsEnAttente, rapportFinancier } from "@/features/finances/queries";
-import { traiterAnnulation } from "@/features/finances/actions";
+import { MODES, impayes as lireImpayes, journalCaisse } from "@/lib/api/backend";
 import { PageBody, PageHeader } from "@/components/layout/page-header";
 import { Card, CardHeader } from "@/components/ui/card";
-import { ButtonLink } from "@/components/ui/button";
-import { Table, Td, Th } from "@/components/ui/data-table";
+import { Badge } from "@/components/ui/badge";
 import { GrilleStats, StatCard } from "@/components/ui/stat-card";
-import { Personne } from "@/components/ui/avatar";
-import { ActionButton } from "@/components/ui/action-button";
-import { BarChart } from "@/components/charts/bar-chart";
-import { DonutChart } from "@/components/charts/donut-chart";
+import { LigneVide, Table, Td, Th } from "@/components/ui/data-table";
 
-const COULEURS = ["#f5b800", "#ff7900", "#0e7c5a", "#173f73"];
-
-export default async function RapportsFinanciersPage() {
-  const [t, lang, r, annulations] = await Promise.all([getT(), getLang(), rapportFinancier(), annulationsEnAttente()]);
+export default async function FinancesPage() {
+  const aujourdhui = aujourdhuiIso();
+  const debutMois = `${aujourdhui.slice(0, 8)}01`;
+  const debutAnnee = `${Number(aujourdhui.slice(0, 4)) - (Number(aujourdhui.slice(5, 7)) < 9 ? 1 : 0)}-09-01`;
+  const [t, lang, impayes, mois, annee] = await Promise.all([getT(), getLang(), lireImpayes(), journalCaisse(debutMois, aujourdhui), journalCaisse(debutAnnee, aujourdhui)]);
+  const valides = (l: typeof mois) => l.filter((p) => p.statut === "VALIDE");
+  const total = (l: typeof mois) => valides(l).reduce((s, p) => s + Number(p.montant), 0);
+  const resteDu = impayes.reduce((s, i) => s + Number(i.solde), 0);
   return (
     <>
-      <PageHeader
-        titre={t("Rapports financiers", "Financial reports")}
-        sousTitre={t("Année 2026-2027 · Consultation des encaissements saisis par la comptabilité", "Year 2026-2027 · Collections recorded by accounting")}
-        actions={<ButtonLink href={`/api/exports/rapport-financier?lang=${lang}`} variante="secondaire" prefetch={false}>{t("Exporter Excel", "Export Excel")}</ButtonLink>}
-      />
+      <PageHeader titre={t("Finances", "Finance")} sousTitre={t("Chiffres issus des paiements enregistrés par l'économat.", "Figures from payments recorded by the bursar.")} />
       <PageBody>
         <GrilleStats>
-          <StatCard libelle={t("Frais attendus", "Expected fees")} valeur={millions(r.attendu, lang)} detail={t("FCFA · année 2026-2027", "FCFA · year 2026-2027")} />
-          <StatCard libelle={t("Frais encaissés", "Collected")} valeur={millions(r.encaisse, lang)} detail={t(`${r.taux} % du total`, `${r.taux}% of total`)} ton="succes" />
-          <StatCard libelle={t("Reste à encaisser", "Outstanding")} valeur={millions(r.reste, lang)} detail="FCFA" ton="alerte" />
-          <StatCard libelle={t("Remises accordées", "Discounts granted")} valeur={millions(r.remises, lang)} detail="FCFA" />
+          <StatCard libelle={t("Encaissé ce mois", "Collected this month")} valeur={fcfa(total(mois), lang)} detail={t(`${valides(mois).length} paiements`, `${valides(mois).length} payments`)} ton="succes" />
+          <StatCard libelle={t("Encaissé depuis la rentrée", "Collected since September")} valeur={fcfa(total(annee), lang)} detail={t(`${valides(annee).length} paiements`, `${valides(annee).length} payments`)} />
+          <StatCard libelle={t("Reste à percevoir", "Outstanding")} valeur={fcfa(resteDu, lang)} detail={t(`${impayes.length} élèves`, `${impayes.length} students`)} ton="danger" />
+          <StatCard libelle={t("Paiements annulés", "Cancelled payments")} valeur={annee.length - valides(annee).length} detail={t("Depuis la rentrée", "Since September")} ton="alerte" />
         </GrilleStats>
-
-        {annulations.length > 0 && (
-          <Card className="border-amber-200">
-            <CardHeader titre={t("Annulations de paiement à valider", "Payment cancellations to approve")} sousTitre={t("Toute annulation exige un motif et la validation de la direction.", "Every cancellation requires a reason and management approval.")} />
+        <div className="grid gap-6 xl:grid-cols-2">
+          <Card>
+            <CardHeader titre={t("Plus gros impayés", "Largest arrears")} />
             <Table>
-              <thead>
-                <tr>
-                  <Th>{t("Reçu", "Receipt")}</Th>
-                  <Th>{t("Élève", "Student")}</Th>
-                  <Th>{t("Montant", "Amount")}</Th>
-                  <Th>{t("Motif", "Reason")}</Th>
-                  <Th />
-                </tr>
-              </thead>
+              <thead><tr><Th>{t("Élève", "Student")}</Th><Th>{t("Dû", "Due")}</Th><Th>{t("Payé", "Paid")}</Th><Th>{t("Reste", "Balance")}</Th></tr></thead>
               <tbody>
-                {annulations.map(({ paiement: p, eleve }) => (
-                  <tr key={p.id}>
-                    <Td className="font-mono text-xs">{p.numeroRecu}</Td>
-                    <Td>{eleve.prenom} {eleve.nom}</Td>
-                    <Td className="font-semibold">{fcfa(p.montant, lang)}</Td>
-                    <Td className="text-muted">{p.motifAnnulation}</Td>
-                    <Td>
-                      <div className="flex justify-end gap-1.5">
-                        <ActionButton action={traiterAnnulation.bind(null, p.id, "refuser")} variante="secondaire">{t("Refuser", "Reject")}</ActionButton>
-                        <ActionButton action={traiterAnnulation.bind(null, p.id, "valider")} variante="danger" confirmation={t("Annuler définitivement ce paiement ?", "Permanently cancel this payment?")}>{t("Valider l'annulation", "Approve cancellation")}</ActionButton>
-                      </div>
-                    </Td>
+                {impayes.length === 0 && <LigneVide colSpan={4} texte={t("Aucun impayé.", "No arrears.")} />}
+                {impayes.slice(0, 10).map((i) => (
+                  <tr key={i.eleveId}>
+                    <Td className="font-semibold">{i.eleve.prenom} {i.eleve.nom}</Td>
+                    <Td>{fcfa(Number(i.totalDu), lang)}</Td>
+                    <Td>{fcfa(Number(i.totalPaye), lang)}</Td>
+                    <Td className="font-semibold text-red-700">{fcfa(Number(i.solde), lang)}</Td>
                   </tr>
                 ))}
               </tbody>
             </Table>
           </Card>
-        )}
-
-        <div className="grid gap-6 xl:grid-cols-[3fr_2fr]">
           <Card>
-            <CardHeader titre={t("Encaissements par mois", "Collections per month")} action={<span className="text-xs text-muted">{t("en millions de FCFA", "in millions FCFA")}</span>} />
-            <BarChart donnees={r.mois.map((m, i, arr) => ({ libelle: moisCourt(m.mois, lang), valeur: Math.round(m.montant / 100_000) / 10, accent: i === arr.length - 1 }))} format={(v) => nombre(v, lang, v % 1 ? 1 : 0)} />
-          </Card>
-          <Card>
-            <CardHeader titre={t("Modes de paiement", "Payment methods")} />
-            <DonutChart
-              parts={r.parMode.map((p, i) => ({ libelle: lib(MODE_PAIEMENT, p.mode, t), valeur: p.montant, couleur: COULEURS[i] }))}
-              format={(v) => `${Math.round((v / Math.max(1, r.encaisse)) * 100)} %`}
-            />
+            <CardHeader titre={t("Paiements du mois", "Payments this month")} />
+            <Table>
+              <thead><tr><Th>{t("Date", "Date")}</Th><Th>{t("Élève", "Student")}</Th><Th>{t("Montant", "Amount")}</Th><Th>{t("Mode", "Method")}</Th></tr></thead>
+              <tbody>
+                {mois.length === 0 && <LigneVide colSpan={4} texte={t("Aucun paiement ce mois-ci.", "No payment this month.")} />}
+                {mois.slice(0, 12).map((p) => (
+                  <tr key={p.id}>
+                    <Td className="text-muted">{dateCourte(p.date, lang)}</Td>
+                    <Td>{p.elevePrenom} {p.eleveNom}</Td>
+                    <Td className="font-semibold">{fcfa(Number(p.montant), lang)} {p.statut === "ANNULE" && <Badge ton="danger">{t("Annulé", "Cancelled")}</Badge>}</Td>
+                    <Td>{lib(MODE_PAIEMENT, MODES[p.mode], t)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
           </Card>
         </div>
-
-        <Card>
-          <CardHeader titre={t("Plus gros impayés", "Largest arrears")} />
-          <Table>
-            <thead>
-              <tr>
-                <Th>{t("Élève", "Student")}</Th>
-                <Th>{t("Classe", "Class")}</Th>
-                <Th>{t("Montant dû", "Amount due")}</Th>
-                <Th>{t("Retard", "Overdue")}</Th>
-                <Th>{t("Dernière relance", "Last reminder")}</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {r.plusGrosImpayes.map((s) => (
-                <tr key={s.eleve.id}>
-                  <Td><Personne nom={`${s.eleve.prenom} ${s.eleve.nom}`} /></Td>
-                  <Td>{s.classe?.libelle}</Td>
-                  <Td className="font-semibold text-red-600">{fcfa(s.montantEchu, lang)}</Td>
-                  <Td>{t(`${s.retardJours} jours`, `${s.retardJours} days`)}</Td>
-                  <Td className="text-muted">{s.derniereRelance ? jourMois(s.derniereRelance, lang) : t("Jamais", "Never")}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        </Card>
       </PageBody>
     </>
   );

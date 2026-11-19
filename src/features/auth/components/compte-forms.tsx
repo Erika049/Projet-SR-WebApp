@@ -2,21 +2,20 @@
 
 import { changerMotDePasse, modifierProfil } from "@/features/auth/actions";
 import { ActionForm } from "@/components/ui/action-form";
-import { Field, Input, Select } from "@/components/ui/form-field";
+import { Field, Input } from "@/components/ui/form-field";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { useT } from "@/lib/i18n/client";
 
-export function ProfilForm({ telephone, email, langue }: { telephone: string; email: string; langue: string }) {
+export function ProfilForm({ telephone, email }: { telephone: string; email: string }) {
   const t = useT();
   return (
     <ActionForm action={modifierProfil}>
       {() => (
         <>
-          <Field label={t("Téléphone", "Phone")}><Input name="telephone" defaultValue={telephone} /></Field>
-          <Field label={t("Courriel", "Email")}><Input type="email" name="email" defaultValue={email} /></Field>
-          <Field label={t("Langue de l'interface", "Interface language")}>
-            <Select name="langue" defaultValue={langue} options={[{ value: "fr", label: "Français" }, { value: "en", label: "English" }]} />
+          <Field label={t("Adresse e-mail (identifiant de connexion)", "Email (sign-in ID)")}>
+            <Input type="email" name="email" defaultValue={email} required />
           </Field>
+          <Field label={t("Téléphone", "Phone")}><Input name="telephone" defaultValue={telephone} /></Field>
           <SubmitButton>{t("Enregistrer", "Save")}</SubmitButton>
         </>
       )}

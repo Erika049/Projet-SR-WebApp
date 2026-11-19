@@ -3,20 +3,18 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { BookOpen, LogOut, Menu, X } from "lucide-react";
+import { LogOut, Menu, X } from "lucide-react";
+import { Logo } from "@/components/ui/logo";
 import { NAVIGATION, type CleBadge } from "@/config/navigation";
 import { LIBELLE_ESPACE, type Espace } from "@/lib/auth/roles";
 import { useLang, useT } from "@/lib/i18n/client";
 import { deconnexion } from "@/features/auth/actions";
 import { cn } from "@/lib/utils";
 
-export function Logo({ lien }: { lien: string }) {
+function LogoLien({ lien }: { lien: string }) {
   return (
-    <Link href={lien} className="flex items-center gap-2.5">
-      <span className="grid size-9 place-items-center rounded-xl bg-navy-700 text-white">
-        <BookOpen className="size-5" />
-      </span>
-      <span className="text-lg font-bold text-navy-800">SchoolConnect</span>
+    <Link href={lien} aria-label="SchoolConnect">
+      <Logo taille={36} avecNom />
     </Link>
   );
 }
@@ -36,7 +34,7 @@ export function Sidebar({ espace, badges }: { espace: Espace; badges: Partial<Re
   const contenu = (
     <>
       <div className="px-5 pt-5">
-        <Logo lien={racine} />
+        <LogoLien lien={racine} />
         <p className="mt-4 rounded-lg bg-brand-50 px-3 py-1.5 text-center text-[11px] font-bold uppercase tracking-wider text-brand-700">
           {t(...LIBELLE_ESPACE[espace])}
         </p>
@@ -59,7 +57,7 @@ export function Sidebar({ espace, badges }: { espace: Espace; badges: Partial<Re
               {actif && <span className="absolute -left-3 top-1.5 bottom-1.5 w-1 rounded-r bg-brand-600" />}
               <Icone className="size-[18px] shrink-0" />
               <span className="flex-1 leading-tight">{t(...e.libelle)}</span>
-              {!!n && <span className={cn("rounded-md px-1.5 text-xs font-bold", e.badge === "notifications" || e.badge === "impayes" ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-700")}>{n}</span>}
+              {!!n && <span className={cn("rounded-md px-1.5 text-xs font-bold", e.badge === "impayes" ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-700")}>{n}</span>}
             </Link>
           );
         })}
@@ -77,7 +75,7 @@ export function Sidebar({ espace, badges }: { espace: Espace; badges: Partial<Re
     <>
       {/* Mobile : bandeau + tiroir */}
       <div className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-white px-4 py-3 lg:hidden">
-        <Logo lien={racine} />
+        <LogoLien lien={racine} />
         <button onClick={() => setOuvert(true)} className="rounded-lg p-2 text-navy-700 hover:bg-navy-50" aria-label={t("Ouvrir le menu", "Open menu")}>
           <Menu className="size-5" />
         </button>

@@ -1,6 +1,6 @@
-// Centre de notifications (CU-SYS-01) — composant partagé entre les espaces.
-import { NotificationsPage } from "@/features/notifications/components/notifications-page";
+// Fonction sans équivalent dans le backend SchoolConnect : aucune donnée fictive n'est affichée.
+import { Indisponible } from "@/components/layout/indisponible";
 
-export default function Page(props: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  return <NotificationsPage searchParams={props.searchParams} />;
+export default function Page() {
+  return <Indisponible titre={["Notifications", "Notifications"]} fonction={["Les notifications du personnel", "Staff notifications"]} />;
 }

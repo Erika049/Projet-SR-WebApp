@@ -1,10 +1,9 @@
-// En-tête de page des espaces : « SCHOOLCONNECT · DIRECTION / Tableau de bord » + FR|EN + utilisateur.
+// En-tête de page des espaces : « SCHOOLCONNECT · DIRECTION / Tableau de bord » + utilisateur.
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth/dal";
 import { ESPACE_PAR_ROLE, LIBELLE_ESPACE, LIBELLE_ROLE } from "@/lib/auth/roles";
 import { getLang, getT } from "@/lib/i18n/server";
-import { LocaleSwitcher } from "./locale-switcher";
 import { Avatar } from "@/components/ui/avatar";
 
 export async function PageHeader({
@@ -31,7 +30,6 @@ export async function PageHeader({
             <h1 className="truncate text-2xl font-bold text-navy-800 sm:text-[28px]">{titre}</h1>
           </div>
           <div className="flex items-center gap-4">
-            <LocaleSwitcher />
             <Link href={`/${lang}/compte`} className="flex items-center gap-3 rounded-xl px-2 py-1 hover:bg-slate-50">
               <Avatar nom={session.nomAffiche} taille="md" className="bg-navy-700 text-white" />
               <span className="hidden text-left sm:block">

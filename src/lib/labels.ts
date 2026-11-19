@@ -8,6 +8,8 @@ export const MODE_PAIEMENT: Record<string, Libelle> = {
   mtn_momo: ["MTN MoMo", "MTN MoMo"],
   orange_money: ["Orange Money", "Orange Money"],
   virement: ["Virement", "Bank transfer"],
+  mobile_money: ["Mobile Money", "Mobile Money"],
+  cheque: ["Chèque", "Cheque"],
 };
 
 export const PLAN: Record<string, Libelle> = {

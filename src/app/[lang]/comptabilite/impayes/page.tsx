@@ -1,82 +1,52 @@
-// Route : /[lang]/comptabilite/impayes — Impayés et relances (CU-ECO-06, CU-SYS-03).
+// Route : /[lang]/comptabilite/impayes — Élèves en impayé et relance des parents (CU-ECO-06, CU-SYS-03).
 import Link from "next/link";
 import { getLang, getT } from "@/lib/i18n/server";
-import { fcfa, jourMois, nombre } from "@/lib/format";
-import { numeroPage } from "@/lib/api/pagination";
-import { premier } from "@/lib/utils";
-import { listerImpayes } from "@/features/finances/queries";
-import { relancerParent, relancerTous } from "@/features/finances/actions";
+import { fcfa } from "@/lib/format";
+import { impayes as lireImpayes } from "@/lib/api/backend";
+import { relancerImpayes } from "@/features/finances/actions";
 import { PageBody, PageHeader } from "@/components/layout/page-header";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { ButtonLink } from "@/components/ui/button";
-import { LigneVide, Pagination, Table, Td, Th } from "@/components/ui/data-table";
-import { StatCard } from "@/components/ui/stat-card";
-import { Tabs } from "@/components/ui/tabs";
-import { Personne } from "@/components/ui/avatar";
-import { ActionButton } from "@/components/ui/action-button";
+import { Card, CardHeader } from "@/components/ui/card";
+import { GrilleStats, StatCard } from "@/components/ui/stat-card";
+import { LigneVide, Table, Td, Th } from "@/components/ui/data-table";
+import { Formulaire } from "@/components/ui/formulaire";
 
-export default async function ImpayesPage({ searchParams }: PageProps<"/[lang]/comptabilite/impayes">) {
-  const [sp, t, lang] = await Promise.all([searchParams, getT(), getLang()]);
-  const filtre = premier(sp.filtre);
-  const r = await listerImpayes({ filtre, page: numeroPage(sp.page) });
-  const base = `/${lang}/comptabilite/impayes`;
+export default async function ImpayesPage() {
+  const [t, lang, impayes] = await Promise.all([getT(), getLang(), lireImpayes()]);
+  const total = impayes.reduce((s, i) => s + Number(i.solde), 0);
   return (
     <>
-      <PageHeader
-        titre={t("Impayés et relances", "Arrears and reminders")}
-        sousTitre={t("Élèves dont l'échéance est dépassée.", "Students past their due date.")}
-        actions={
-          <>
-            <ButtonLink href={`/api/exports/impayes?lang=${lang}`} variante="secondaire" prefetch={false}>{t("Exporter", "Export")}</ButtonLink>
-            <ActionButton action={relancerTous} variante="primaire" taille="md" confirmation={t(`Relancer les ${r.nombre} parents par SMS ou notification ?`, `Remind all ${r.nombre} parents by SMS or notification?`)}>
-              {t(`Relancer les ${r.nombre} parents`, `Remind all ${r.nombre} parents`)}
-            </ActionButton>
-          </>
-        }
-      />
+      <PageHeader titre={t("Impayés", "Arrears")} />
       <PageBody>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <StatCard libelle={t("Élèves en impayé", "Students in arrears")} valeur={r.nombre} detail={t("Échéance dépassée", "Past due")} ton="danger" />
-          <StatCard libelle={t("Montant en retard", "Overdue amount")} valeur={nombre(r.montant, lang)} detail="FCFA" ton="alerte" />
-          <StatCard libelle={t("Relances envoyées", "Reminders sent")} valeur={r.relancesSemaine} detail={t("Cette semaine", "This week")} />
-        </div>
+        <GrilleStats>
+          <StatCard libelle={t("Élèves concernés", "Students")} valeur={impayes.length} ton="alerte" />
+          <StatCard libelle={t("Reste à percevoir", "Outstanding")} valeur={fcfa(total, lang)} ton="danger" />
+        </GrilleStats>
         <Card>
-          <Tabs
-            className="mb-4"
-            onglets={[
-              { href: base, libelle: t("Tous", "All"), compteur: r.nombre },
-              { href: `${base}?filtre=7`, libelle: t("Plus de 7 jours", "Over 7 days"), compteur: r.plusDe7 },
-              { href: `${base}?filtre=30`, libelle: t("Plus de 30 jours", "Over 30 days"), compteur: r.plusDe30 },
-            ]}
+          <CardHeader
+            titre={t("Liste des impayés", "Arrears list")}
+            sousTitre={t("La relance prévient les parents des montants échus non réglés (notification mobile).", "The reminder notifies parents of overdue unpaid amounts (mobile notification).")}
+            action={
+              impayes.length > 0 ? (
+                <Formulaire action={relancerImpayes} libelle={t("Relancer tous les parents", "Remind all parents")} variante="secondaire" confirmation={t("Relancer les parents de tous les élèves en impayé échu ?", "Remind the parents of every student with overdue fees?")}>
+                  <span />
+                </Formulaire>
+              ) : undefined
+            }
           />
           <Table>
-            <thead>
-              <tr>
-                <Th>{t("Élève", "Student")}</Th>
-                <Th>{t("Classe", "Class")}</Th>
-                <Th>{t("Montant dû", "Amount due")}</Th>
-                <Th>{t("Retard", "Overdue")}</Th>
-                <Th>{t("Dernière relance", "Last reminder")}</Th>
-                <Th />
-              </tr>
-            </thead>
+            <thead><tr><Th>{t("Élève", "Student")}</Th><Th>{t("Dû", "Due")}</Th><Th>{t("Payé", "Paid")}</Th><Th>{t("Reste", "Balance")}</Th></tr></thead>
             <tbody>
-              {r.items.length === 0 && <LigneVide colSpan={6} texte={t("Aucun impayé.", "No arrears.")} />}
-              {r.items.map((s) => (
-                <tr key={s.eleve.id}>
-                  <Td><Link href={`/${lang}/comptabilite/situation/${s.eleve.id}`} className="hover:underline"><Personne nom={`${s.eleve.prenom} ${s.eleve.nom}`} /></Link></Td>
-                  <Td>{s.classe?.libelle}</Td>
-                  <Td className="font-semibold text-red-600">{fcfa(s.montantEchu, lang)}</Td>
-                  <Td><Badge ton={s.retardJours > 30 ? "danger" : s.retardJours > 7 ? "alerte" : "neutre"}>{t(`${s.retardJours} jours`, `${s.retardJours} days`)}</Badge></Td>
-                  <Td className="text-muted">{s.derniereRelance ? jourMois(s.derniereRelance, lang) : t("Jamais", "Never")}</Td>
-                  <Td className="text-right"><ActionButton action={relancerParent.bind(null, s.eleve.id)}>{t("Relancer", "Remind")}</ActionButton></Td>
+              {impayes.length === 0 && <LigneVide colSpan={4} texte={t("Aucun impayé.", "No arrears.")} />}
+              {impayes.map((i) => (
+                <tr key={i.eleveId}>
+                  <Td><Link href={`/${lang}/comptabilite/situation/${i.eleveId}`} className="font-semibold text-navy-700 hover:underline">{i.eleve.prenom} {i.eleve.nom}</Link></Td>
+                  <Td>{fcfa(Number(i.totalDu), lang)}</Td>
+                  <Td>{fcfa(Number(i.totalPaye), lang)}</Td>
+                  <Td className="font-semibold text-red-700">{fcfa(Number(i.solde), lang)}</Td>
                 </tr>
               ))}
             </tbody>
           </Table>
-          <Pagination page={r.page} total={r.total} taille={r.taille} base={base} params={{ filtre }} t={t} />
-          <p className="mt-3 text-xs text-muted">{t("Relance par SMS ou notification, selon les préférences du parent.", "Reminder by SMS or notification, depending on the parent's preferences.")}</p>
         </Card>
       </PageBody>
     </>

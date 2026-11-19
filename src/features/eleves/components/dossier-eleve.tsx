@@ -1,193 +1,162 @@
-// Dossier de l'élève : identité, tuteur et accès parent, historique des corrections, actions du secrétariat.
+// Dossier de l'élève (backend : /etablissements/{id}/repertoire-eleves/{eleveId}) : identité, classe, tuteurs,
+// codes de liaison. Le secrétariat peut changer la classe et ajouter un tuteur (lien direct ou code).
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { FileText, KeyRound, Printer, Wallet } from "lucide-react";
+import { FileText, Printer } from "lucide-react";
 import { getLang, getT } from "@/lib/i18n/server";
-import { dateCourte, fcfa, jourMois } from "@/lib/format";
-import { LIAISON, LIEN_TUTEUR, STATUT_CORRECTION, lib, ton } from "@/lib/labels";
-import { getEleve } from "@/features/eleves/queries";
-import { getSituation } from "@/features/finances/queries";
-import { listerClasses } from "@/features/parametrage/queries";
-import { affecterClasse, archiverDossier, completerPiece, demanderCorrection, regenererCode, traiterCorrection } from "@/features/eleves/actions";
+import { dateCourte } from "@/lib/format";
+import { classes as lireClasses, dossier as lireDossier } from "@/lib/api/backend";
+import { affecterClasse, ajouterTuteur } from "@/features/eleves/actions";
+import { traiterLiaison } from "@/features/liaisons/actions";
 import { PageBody, PageHeader } from "@/components/layout/page-header";
 import { Card, CardHeader, Details, Note } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Table, Td, Th, LigneVide } from "@/components/ui/data-table";
-import { Avatar } from "@/components/ui/avatar";
 import { ActionButton } from "@/components/ui/action-button";
-import { Dialog } from "@/components/ui/dialog";
-import { ArchiveForm, ClasseForm, CorrectionForm } from "./dossier-forms";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Choix, Field, Input, Select } from "@/components/ui/form-field";
+import { Formulaire } from "@/components/ui/formulaire";
 
-export async function DossierEleve({ id, espace }: { id: string; espace: "direction" | "secretariat" }) {
-  const [t, lang, e, classes, situation] = await Promise.all([getT(), getLang(), getEleve(id), listerClasses(), getSituation(id)]);
-  if (!e) notFound();
-  const secretariat = espace === "secretariat";
+const LIENS: Record<string, [string, string]> = {
+  PERE: ["Père", "Father"],
+  MERE: ["Mère", "Mother"],
+  TUTEUR_LEGAL: ["Tuteur légal", "Legal guardian"],
+  AUTRE: ["Autre", "Other"],
+};
+
+export async function DossierEleve({ eleveId, espace, inscrit }: { eleveId: string; espace: "secretariat" | "direction"; inscrit?: boolean }) {
+  const [t, lang, d, classes] = await Promise.all([getT(), getLang(), lireDossier(eleveId), lireClasses()]);
+  if (!d) notFound();
+  const e = d.eleve;
+  const gestion = espace === "secretariat";
   const base = `/${lang}/${espace}/eleves`;
+  const codesActifs = d.codes.filter((c) => !c.utilise && !c.expire);
+  const STATUT: Record<string, [string, "succes" | "alerte" | "danger"]> = {
+    VALIDE: [t("Lié", "Linked"), "succes"],
+    EN_ATTENTE: [t("À valider", "Pending"), "alerte"],
+    REVOQUE: [t("Retiré", "Removed"), "danger"],
+  };
 
   return (
     <>
-      <PageHeader titre={t("Dossier de l'élève", "Student file")} filAriane={[{ href: base, libelle: t("Élèves", "Students") }]} sousTitre={`${e.prenom} ${e.nom}`} />
+      <PageHeader
+        titre={`${e.prenom} ${e.nom}`}
+        filAriane={[{ href: base, libelle: t("Élèves", "Students") }]}
+        sousTitre={`${e.matricule} · ${e.classeNom ?? t("sans classe", "no class")}`}
+        actions={
+          gestion ? (
+            <>
+              <Link href={`${base}/${eleveId}/certificat`} className="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-navy-700">
+                <FileText className="size-4" /> {t("Certificat de scolarité", "School certificate")}
+              </Link>
+              {codesActifs.length > 0 && (
+                <Link href={`${base}/${eleveId}/fiche-liaison`} className="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-navy-700">
+                  <Printer className="size-4" /> {t("Fiche de liaison", "Link sheet")}
+                </Link>
+              )}
+            </>
+          ) : undefined
+        }
+      />
       <PageBody>
-        <Card>
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <Avatar nom={`${e.prenom} ${e.nom}`} taille="lg" />
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-xl font-bold text-navy-800">{e.prenom} {e.nom}</h2>
-                  <Badge ton={e.dossierComplet ? "succes" : "alerte"}>{e.dossierComplet ? t("Dossier complet", "Complete file") : t("Dossier incomplet", "Incomplete file")}</Badge>
-                  {e.statut === "sorti" && <Badge ton="danger">{t("Sorti", "Left")}</Badge>}
-                  {e.redoublant && <Badge ton="alerte">{t("Redoublant", "Repeating")}</Badge>}
-                </div>
-                <p className="text-sm text-muted">{e.matricule} · {e.classe.libelle} · {t("Année", "Year")} 2026-2027</p>
+        {inscrit && (
+          <Note titre={t("Élève inscrit", "Student enrolled")} ton="navy">
+            {codesActifs.length
+              ? t(`Remettez au tuteur le code de liaison ${codesActifs[0].code} (fiche de liaison imprimable).`, `Give the guardian the link code ${codesActifs[0].code} (printable link sheet).`)
+              : t("Le dossier est créé.", "The file is created.")}
+          </Note>
+        )}
+        <div className="grid gap-6 xl:grid-cols-2">
+          <Card>
+            <CardHeader titre={t("Identité et scolarité", "Identity and enrolment")} />
+            <Details
+              lignes={[
+                [t("Nom", "Last name"), e.nom],
+                [t("Prénom", "First name"), e.prenom],
+                [t("Sexe", "Sex"), e.sexe === "F" ? t("Féminin", "Female") : t("Masculin", "Male")],
+                [t("Naissance", "Born"), `${dateCourte(e.dateNaissance, lang)}${e.lieuNaissance ? ` · ${e.lieuNaissance}` : ""}`],
+                [t("Nationalité", "Nationality"), d.nationalite ?? "—"],
+                [t("Matricule", "Student ID"), e.matricule],
+                [t("Classe", "Class"), e.classeNom ?? "—"],
+                [t("Inscription", "Enrolment"), `${dateCourte(e.dateInscription, lang)} · ${d.typeInscription.toLowerCase()}${d.redoublant ? t(" · redoublant", " · repeating") : ""}`],
+              ]}
+            />
+            {gestion && (
+              <div className="mt-6 border-t border-line pt-4">
+                <Formulaire action={affecterClasse.bind(null, eleveId)} libelle={t("Changer de classe", "Change class")} variante="secondaire" reinitialiser={false}>
+                  <Field label={t("Classe", "Class")}>
+                    <Select name="classeId" defaultValue={e.classeId ?? ""} vide={t("Choisir…", "Choose…")} options={classes.map((c) => ({ value: c.id, label: c.nom }))} />
+                  </Field>
+                </Formulaire>
               </div>
-            </div>
-            {secretariat && e.statut === "actif" && (
-              <Dialog declencheur={t("Demander une correction", "Request a correction")} titre={t("Correction du dossier", "File correction")} variante="primaire" taille="md">
-                <CorrectionForm action={demanderCorrection.bind(null, e.id)} />
-              </Dialog>
             )}
-          </div>
-        </Card>
-
-        <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
+          </Card>
           <div className="space-y-6">
             <Card>
-              <CardHeader titre={t("Identité", "Identity")} />
-              <Details
-                lignes={[
-                  [t("Nom", "Last name"), e.nom],
-                  [t("Prénom", "First name"), e.prenom],
-                  [t("Sexe", "Sex"), e.sexe === "F" ? t("Féminin", "Female") : t("Masculin", "Male")],
-                  [t("Date de naissance", "Date of birth"), dateCourte(e.dateNaissance, lang)],
-                  [t("Lieu de naissance", "Place of birth"), e.lieuNaissance || "—"],
-                  [t("Nationalité", "Nationality"), e.nationalite],
-                  [t("Inscription", "Enrolment"), `${dateCourte(e.inscritLe, lang)} · ${e.typeInscription === "nouveau" ? t("Nouvel élève", "New student") : e.typeInscription === "reinscription" ? t("Réinscription", "Re-enrolment") : t("Transfert", "Transfer")}`],
-                ]}
-              />
-            </Card>
-
-            <Card>
-              <CardHeader titre={t("Parent ou tuteur et accès", "Parent or guardian and access")} />
-              <Table>
-                <thead>
-                  <tr>
-                    <Th>{t("Tuteur", "Guardian")}</Th>
-                    <Th>{t("Téléphone", "Phone")}</Th>
-                    <Th>{t("Code de liaison", "Link code")}</Th>
-                    <Th>{t("Statut", "Status")}</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <Td>
-                      <span className="font-semibold">{e.tuteur.nom}</span>
-                      <span className="block text-xs text-muted">{lib(LIEN_TUTEUR, e.tuteur.lien, t)}</span>
-                    </Td>
-                    <Td>{e.tuteur.telephone}</Td>
-                    <Td className="font-mono">{secretariat ? e.codeLiaison : "•••• ••"}</Td>
-                    <Td><Badge ton={ton(LIAISON, e.liaison)}>{lib(LIAISON, e.liaison, t)}</Badge></Td>
-                  </tr>
-                </tbody>
-              </Table>
-            </Card>
-
-            <Card>
-              <CardHeader titre={t("Historique des corrections", "Correction history")} />
-              <Table>
-                <thead>
-                  <tr>
-                    <Th>{t("Date", "Date")}</Th>
-                    <Th>{t("Champ", "Field")}</Th>
-                    <Th>{t("Ancienne valeur", "Old value")}</Th>
-                    <Th>{t("Nouvelle valeur", "New value")}</Th>
-                    <Th>{t("Statut", "Status")}</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {e.corrections.length === 0 && <LigneVide colSpan={5} texte={t("Aucune correction.", "No corrections.")} />}
-                  {e.corrections.map((c) => (
-                    <tr key={c.id}>
-                      <Td className="whitespace-nowrap">{jourMois(c.date, lang)}</Td>
-                      <Td>{c.champ}</Td>
-                      <Td className="text-muted">{c.ancienneValeur}</Td>
-                      <Td className="font-medium">{c.nouvelleValeur}</Td>
-                      <Td>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge ton={ton(STATUT_CORRECTION, c.statut)}>{lib(STATUT_CORRECTION, c.statut, t)}</Badge>
-                          {espace === "direction" && c.statut === "attente_directeur" && (
-                            <>
-                              <ActionButton action={traiterCorrection.bind(null, c.id, "accepter")} variante="succes">{t("Valider", "Approve")}</ActionButton>
-                              <ActionButton action={traiterCorrection.bind(null, c.id, "refuser")} variante="danger">{t("Refuser", "Reject")}</ActionButton>
-                            </>
-                          )}
-                        </div>
-                      </Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </Card>
-          </div>
-
-          <div className="space-y-6">
-            {secretariat && e.statut === "actif" && (
-              <Card>
-                <CardHeader titre={t("Actions", "Actions")} />
-                <div className="flex flex-col gap-2">
-                  <Link href={`${base}/${e.id}/fiche-liaison`} className="flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-navy-700 hover:bg-navy-50">
-                    <Printer className="size-4" /> {t("Imprimer la fiche de liaison", "Print the link sheet")}
-                  </Link>
-                  <Link href={`${base}/${e.id}/certificat`} className="flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-navy-700 hover:bg-navy-50">
-                    <FileText className="size-4" /> {t("Générer un certificat de scolarité", "Generate a school certificate")}
-                  </Link>
-                  <ActionButton action={regenererCode.bind(null, e.id)} variante="secondaire" taille="md" className="justify-start" confirmation={t("L'ancien code ne fonctionnera plus. Continuer ?", "The old code will stop working. Continue?")}>
-                    <KeyRound className="size-4" /> {t("Régénérer le code de liaison", "Regenerate link code")}
-                  </ActionButton>
-                  <Dialog declencheur={t("Affecter ou transférer de classe", "Assign or transfer class")} titre={t("Changer de classe", "Change class")} taille="md">
-                    <ClasseForm action={affecterClasse.bind(null, e.id)} classes={classes.map((c) => ({ id: c.id, libelle: `${c.libelle} (${c.effectif}/${c.capacite})` }))} actuelle={e.classeId} />
-                  </Dialog>
-                </div>
-              </Card>
-            )}
-
-            {e.piecesManquantes.length > 0 && (
-              <Card>
-                <CardHeader titre={t("Pièces manquantes", "Missing documents")} />
-                <ul className="space-y-2">
-                  {e.piecesManquantes.map((p) => (
-                    <li key={p} className="flex items-center justify-between gap-2 text-sm">
-                      {p}
-                      {secretariat && <ActionButton action={completerPiece.bind(null, e.id, p)} variante="succes">{t("Reçue", "Received")}</ActionButton>}
+              <CardHeader titre={t("Parents et tuteurs", "Parents and guardians")} />
+              {d.tuteurs.length === 0 ? (
+                <EmptyState titre={t("Aucun parent lié", "No linked parent")} texte={t("Le parent saisit un code de liaison dans l'application mobile.", "The parent enters a link code in the mobile app.")} />
+              ) : (
+                <ul className="divide-y divide-line">
+                  {d.tuteurs.map((tu) => (
+                    <li key={tu.id} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm">
+                      <div>
+                        <p className="font-semibold">{tu.prenom} {tu.nom} <span className="font-normal text-muted">· {t(...(LIENS[tu.lien] ?? LIENS.AUTRE))}</span></p>
+                        <p className="text-xs text-muted">
+                          {tu.telephone ?? "—"} · {[tu.peutPayer && t("paie", "pays"), tu.peutJustifier && t("justifie", "justifies")].filter(Boolean).join(", ") || t("consultation", "view only")}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Badge ton={STATUT[tu.statut][1]}>{STATUT[tu.statut][0]}</Badge>
+                        {gestion && tu.statut === "EN_ATTENTE" && (
+                          <>
+                            <ActionButton action={traiterLiaison.bind(null, tu.id, eleveId, "refuser")} variante="danger">{t("Refuser", "Reject")}</ActionButton>
+                            <ActionButton action={traiterLiaison.bind(null, tu.id, eleveId, "accepter")} variante="succes">{t("Accepter", "Accept")}</ActionButton>
+                          </>
+                        )}
+                      </div>
                     </li>
                   ))}
                 </ul>
-              </Card>
-            )}
-
-            {situation && (
+              )}
+            </Card>
+            <Card>
+              <CardHeader titre={t("Codes de liaison", "Link codes")} sousTitre={t("Valables 30 jours, utilisables une seule fois.", "Valid for 30 days, single use.")} />
+              {d.codes.length === 0 ? (
+                <p className="text-sm text-muted">{t("Aucun code généré.", "No code generated.")}</p>
+              ) : (
+                <ul className="divide-y divide-line text-sm">
+                  {d.codes.map((c) => (
+                    <li key={c.code} className="flex items-center justify-between py-2">
+                      <span className="font-mono font-bold tracking-widest">{c.code}</span>
+                      <span className="text-xs text-muted">
+                        {c.utilise ? t("utilisé", "used") : c.expire ? t("expiré", "expired") : `${t("expire le", "expires on")} ${dateCourte(c.expireLe, lang)}`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+            {gestion && (
               <Card>
-                <CardHeader titre={t("Situation financière", "Financial status")} action={<Wallet className="size-4 text-muted" />} />
-                <Details
-                  lignes={[
-                    [t("Frais dus", "Fees due"), fcfa(situation.totalDu, lang)],
-                    [t("Payé", "Paid"), fcfa(situation.paye, lang)],
-                    [t("Solde", "Balance"), <span key="s" className={situation.montantEchu ? "text-red-600" : ""}>{fcfa(situation.solde, lang)}</span>],
-                  ]}
+                <CardHeader
+                  titre={t("Ajouter un parent ou tuteur", "Add a parent or guardian")}
+                  sousTitre={t("S'il a déjà un compte SchoolConnect, il est lié tout de suite ; sinon un code de liaison est généré.", "If they already have a SchoolConnect account they are linked at once; otherwise a link code is generated.")}
                 />
-              </Card>
-            )}
-
-            <Note titre={t("Règle de délégation", "Delegation rule")}>
-              {t("Les corrections d'identité (nom, naissance) sont envoyées au directeur pour validation avant d'être appliquées au dossier.", "Identity corrections (name, birth) are sent to the principal for approval before being applied to the file.")}
-            </Note>
-
-            {secretariat && e.statut === "actif" && (
-              <Card>
-                <CardHeader titre={t("Zone sensible", "Danger zone")} sousTitre={t("Élève sorti de l'établissement (CU-SEC-10).", "Student who left the school (CU-SEC-10).")} />
-                <Dialog declencheur={t("Archiver ou clôturer le dossier", "Archive or close the file")} titre={t("Archiver le dossier", "Archive the file")} variante="danger">
-                  <ArchiveForm action={archiverDossier.bind(null, e.id)} />
-                </Dialog>
+                <Formulaire action={ajouterTuteur.bind(null, eleveId)} libelle={t("Enregistrer le tuteur", "Save guardian")}>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label={t("Prénom", "First name")}><Input name="prenom" required /></Field>
+                    <Field label={t("Nom", "Last name")}><Input name="nom" required /></Field>
+                    <Field label={t("Téléphone", "Phone")}><Input name="telephone" placeholder="6XX XX XX XX" /></Field>
+                    <Field label={t("Courriel (facultatif)", "Email (optional)")}><Input type="email" name="email" /></Field>
+                  </div>
+                  <Field label={t("Lien avec l'élève", "Relationship")}>
+                    <Choix name="lien" defaut="MERE" options={Object.entries(LIENS).map(([value, l]) => ({ value, label: t(...l) }))} />
+                  </Field>
+                  <div className="flex flex-wrap gap-4 text-sm">
+                    <label className="flex items-center gap-2"><input type="checkbox" name="peutPayer" defaultChecked /> {t("Peut payer", "Can pay")}</label>
+                    <label className="flex items-center gap-2"><input type="checkbox" name="peutJustifier" defaultChecked /> {t("Peut justifier les absences", "Can justify absences")}</label>
+                  </div>
+                </Formulaire>
               </Card>
             )}
           </div>

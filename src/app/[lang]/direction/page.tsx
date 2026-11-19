@@ -1,92 +1,60 @@
-// Route : /[lang]/direction — Tableau de bord de la direction (CU-DIR-01).
+// Route : /[lang]/direction — Tableau de bord de la direction (CU-DIR-01), à partir des données du backend.
 import Link from "next/link";
 import { CheckCircle2, GraduationCap, Users, Wallet } from "lucide-react";
+import { getCurrentUser } from "@/lib/auth/dal";
 import { getLang, getT } from "@/lib/i18n/server";
-import { fcfa, jourSemaine, millions, moisCourt, nombre, pourcent } from "@/lib/format";
-import { MODE_PAIEMENT, STATUT_PAIEMENT, lib, ton } from "@/lib/labels";
-import { tableauDirection } from "@/features/tableaux-de-bord/queries";
+import { aujourdhuiIso, fcfa, jourSemaine, pourcent } from "@/lib/format";
+import { classes as lireClasses, impayes as lireImpayes, journalCaisse, personnel, presencesDuJour, repertoire } from "@/lib/api/backend";
 import { PageBody, PageHeader } from "@/components/layout/page-header";
-import { GrilleStats, StatCard } from "@/components/ui/stat-card";
 import { Card, CardHeader } from "@/components/ui/card";
-import { Badge, Compteur } from "@/components/ui/badge";
-import { Table, Td, Th } from "@/components/ui/data-table";
-import { Personne } from "@/components/ui/avatar";
-import { BarChart } from "@/components/charts/bar-chart";
+import { EmptyState } from "@/components/ui/empty-state";
+import { GrilleStats, StatCard } from "@/components/ui/stat-card";
 import { LineChart } from "@/components/charts/line-chart";
 
-export default async function TableauDeBordDirectionPage() {
-  const [t, lang, d] = await Promise.all([getT(), getLang(), tableauDirection()]);
-  const aTraiter: [string, number, string, "alerte" | "danger" | "info"][] = [
-    [t("Bulletins à valider", "Report cards to approve"), d.aTraiter.bulletins, "/direction/notes-bulletins", "alerte"],
-    [t("Corrections d'identité à valider", "Identity corrections to approve"), d.aTraiter.corrections, "/direction/utilisateurs", "info"],
-    [t("Annulations de paiement à valider", "Payment cancellations to approve"), d.aTraiter.annulations, "/direction/finances", "info"],
-    [t("Impayés de plus de 30 jours", "Arrears over 30 days"), d.aTraiter.impayes30, "/direction/finances", "danger"],
-    [t("Enseignants absents ce mois", "Teachers absent this month"), d.aTraiter.enseignantsAbsents, "/direction/assiduite-personnel", "alerte"],
+export default async function TableauDirectionPage() {
+  const aujourdhui = aujourdhuiIso();
+  const [t, lang, session, eleves, classes, membres, presence, impayes, mois] = await Promise.all([
+    getT(), getLang(), getCurrentUser(), repertoire(), lireClasses(), personnel(), presencesDuJour(true), lireImpayes(), journalCaisse(`${aujourdhui.slice(0, 8)}01`, aujourdhui),
+  ]);
+  const encaisse = mois.filter((p) => p.statut === "VALIDE").reduce((s, p) => s + Number(p.montant), 0);
+  const sansParent = eleves.filter((e) => e.liaison !== "LIEE").length;
+  const base = `/${lang}/direction`;
+  const taches: [string, string][] = [
+    ...(presence.aVerifier.length ? [[t(`${presence.aVerifier.length} fiche(s) d'appel en attente du surveillant général`, `${presence.aVerifier.length} roll call(s) waiting for the head of discipline`), `${base}/classes`] as [string, string]] : []),
+    ...(presence.appelsManquants.length ? [[t(`Appel non fait : ${presence.appelsManquants.map((c) => c.libelle).join(", ")}`, `No roll call: ${presence.appelsManquants.map((c) => c.libelle).join(", ")}`), `${base}/classes`] as [string, string]] : []),
+    ...(impayes.length ? [[t(`${impayes.length} élève(s) en impayé`, `${impayes.length} student(s) in arrears`), `${base}/finances`] as [string, string]] : []),
+    ...(sansParent ? [[t(`${sansParent} élève(s) sans parent lié à l'application`, `${sansParent} student(s) without a linked parent`), `${base}/eleves`] as [string, string]] : []),
   ];
-
   return (
     <>
-      <PageHeader titre={t("Tableau de bord", "Dashboard")} sousTitre={`Lycée bilingue de Bafoussam · ${t("Année", "Year")} 2026-2027`} />
+      <PageHeader titre={t("Tableau de bord", "Dashboard")} sousTitre={`${t("Bonjour", "Hello")} ${session.nomAffiche}${session.etablissementNom ? ` · ${session.etablissementNom}` : ""}`} />
       <PageBody>
         <GrilleStats>
-          <StatCard libelle={t("Élèves inscrits", "Enrolled students")} valeur={nombre(d.eleves.total, lang)} detail={t(`+${d.eleves.nouveauxMois} ce mois`, `+${d.eleves.nouveauxMois} this month`)} icone={<GraduationCap className="size-5" />} />
-          <StatCard libelle={t("Personnel", "Staff")} valeur={d.personnel.total} detail={t(`${d.personnel.enseignants} enseignants`, `${d.personnel.enseignants} teachers`)} icone={<Users className="size-5" />} />
-          <StatCard libelle={t("Présence aujourd'hui", "Attendance today")} valeur={pourcent(d.presence.taux, lang, 1)} detail={t(`${d.presence.absences} absences · ${d.presence.retards} retards`, `${d.presence.absences} absences · ${d.presence.retards} late`)} icone={<CheckCircle2 className="size-5" />} ton="succes" />
-          <StatCard libelle={t("Frais encaissés", "Fees collected")} valeur={pourcent(d.finances.taux, lang)} detail={`${millions(d.finances.encaisse, lang)} / ${millions(d.finances.attendu, lang)} FCFA`} icone={<Wallet className="size-5" />} ton="alerte" />
+          <StatCard libelle={t("Élèves", "Students")} valeur={eleves.length} detail={t(`${classes.length} classes`, `${classes.length} classes`)} icone={<GraduationCap className="size-5" />} />
+          <StatCard libelle={t("Personnel", "Staff")} valeur={membres.length} detail={t(`${membres.filter((m) => m.roles.includes("ENSEIGNANT")).length} enseignants`, `${membres.filter((m) => m.roles.includes("ENSEIGNANT")).length} teachers`)} icone={<Users className="size-5" />} />
+          <StatCard libelle={t("Présence aujourd'hui", "Attendance today")} valeur={pourcent(presence.taux, lang, 1)} detail={t(`${presence.absences} absences · ${presence.retards} retards`, `${presence.absences} absences · ${presence.retards} late`)} icone={<CheckCircle2 className="size-5" />} ton="succes" />
+          <StatCard libelle={t("Encaissé ce mois", "Collected this month")} valeur={fcfa(encaisse, lang)} detail={t(`${impayes.length} élèves en impayé`, `${impayes.length} students in arrears`)} icone={<Wallet className="size-5" />} />
         </GrilleStats>
-
         <div className="grid gap-6 xl:grid-cols-[3fr_2fr]">
           <Card>
-            <CardHeader titre={t("Encaissements par mois", "Collections per month")} action={<span className="text-xs text-muted">{t("en millions de FCFA", "in millions FCFA")}</span>} />
-            <BarChart
-              donnees={d.finances.mois.map((m, i, arr) => ({ libelle: moisCourt(m.mois, lang), valeur: Math.round(m.montant / 100_000) / 10, accent: i === arr.length - 1 }))}
-              format={(v) => nombre(v, lang, v % 1 ? 1 : 0)}
-            />
-          </Card>
-          <Card>
             <CardHeader titre={t("Présence sur 7 jours", "Attendance over 7 days")} />
-            <LineChart donnees={d.presence.semaine.map((j) => ({ libelle: jourSemaine(j.date, lang), valeur: j.taux }))} min={88} max={100} suffixe=" %" />
-          </Card>
-        </div>
-
-        <div className="grid gap-6 xl:grid-cols-[2fr_3fr]">
-          <Card>
-            <CardHeader titre={t("À traiter", "To do")} />
-            <ul className="divide-y divide-line">
-              {aTraiter.map(([libelle, n, href, tn]) => (
-                <li key={libelle}>
-                  <Link href={`/${lang}${href}`} className="flex items-center justify-between py-3 text-sm hover:text-navy-700">
-                    {libelle}
-                    <Compteur valeur={n} ton={n ? tn : "neutre"} />
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            {presence.semaine.length === 0 ? (
+              <EmptyState titre={t("Aucun appel sur les 7 derniers jours", "No roll call over the last 7 days")} />
+            ) : (
+              <LineChart donnees={presence.semaine.map((j) => ({ libelle: jourSemaine(j.date, lang), valeur: j.taux }))} min={Math.max(0, Math.floor(Math.min(88, ...presence.semaine.map((j) => j.taux)) / 5) * 5)} max={100} suffixe=" %" />
+            )}
           </Card>
           <Card>
-            <CardHeader titre={t("Derniers paiements", "Latest payments")} action={<Link href={`/${lang}/direction/finances`} className="text-sm font-semibold text-navy-700 hover:underline">{t("Voir tout", "See all")}</Link>} />
-            <Table>
-              <thead>
-                <tr>
-                  <Th>{t("Élève", "Student")}</Th>
-                  <Th>{t("Classe", "Class")}</Th>
-                  <Th>{t("Montant", "Amount")}</Th>
-                  <Th>{t("Mode", "Method")}</Th>
-                  <Th>{t("Statut", "Status")}</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {d.derniersPaiements.map((p) => (
-                  <tr key={p.id}>
-                    <Td><Personne nom={`${p.eleve.prenom} ${p.eleve.nom}`} /></Td>
-                    <Td>{p.classe.libelle}</Td>
-                    <Td className="font-semibold">{fcfa(p.montant, lang)}</Td>
-                    <Td>{lib(MODE_PAIEMENT, p.mode, t)}</Td>
-                    <Td><Badge ton={ton(STATUT_PAIEMENT, p.statut)}>{lib(STATUT_PAIEMENT, p.statut, t)}</Badge></Td>
-                  </tr>
+            <CardHeader titre={t("À suivre", "To follow up")} />
+            {taches.length === 0 ? (
+              <EmptyState titre={t("Rien à signaler", "Nothing to report")} />
+            ) : (
+              <ul className="divide-y divide-line">
+                {taches.map(([libelle, href]) => (
+                  <li key={libelle}><Link href={href} className="block py-3 text-sm hover:text-navy-700">{libelle}</Link></li>
                 ))}
-              </tbody>
-            </Table>
+              </ul>
+            )}
           </Card>
         </div>
       </PageBody>

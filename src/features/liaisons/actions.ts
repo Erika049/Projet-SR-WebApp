@@ -1,12 +1,11 @@
 "use server";
-// CU-SEC-05 : valider ou rejeter une demande de liaison parent-enfant.
+// CU-SEC-05 : valider ou rejeter une demande de liaison parent-enfant (code saisi dans l'application mobile).
 import { refresh } from "next/cache";
-import { ecrire } from "@/lib/api/client";
+import * as b from "@/lib/api/backend";
 import { exigerRole } from "@/lib/auth/dal";
-import * as m from "@/lib/api/mock/scolarite";
 
-export async function traiterLiaison(id: string, decision: "accepter" | "refuser") {
-  const s = await exigerRole("secretariat");
-  await ecrire(() => m.traiterLiaison(id, decision, s.nomAffiche), `/liaisons/demandes/${id}/${decision}`, "POST");
+export async function traiterLiaison(id: string, eleveId: string, decision: "accepter" | "refuser") {
+  await exigerRole("secretariat", "direction");
+  await b.traiterLiaison(id, eleveId, decision);
   refresh();
 }

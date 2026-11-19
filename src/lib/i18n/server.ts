@@ -1,30 +1,26 @@
-// Traduction côté serveur. Chaque texte est écrit dans les deux langues, au plus près de l'écran :
-//   const t = await getT();  t("Élèves", "Students")
+// Textes côté serveur. L'application est uniquement en français : t("Élèves", "Students") renvoie toujours
+// le texte français (la version anglaise reste dans le code, sans être proposée à l'utilisateur).
 import "server-only";
-import { lang } from "next/root-params";
-import { cookies } from "next/headers";
-import { DEFAULT_LOCALE, hasLocale, type Locale } from "./config";
+import { DEFAULT_LOCALE, type Locale } from "./config";
 
 export type T = (fr: string, en: string) => string;
 
 export const traducteur = (l: Locale): T => (fr, en) => (l === "en" ? en : fr);
 
-/** Langue de la route courante (Server Components). */
+/** Langue de l'application : français. */
 export async function getLang(): Promise<Locale> {
-  const l = await lang();
-  return l && hasLocale(l) ? l : DEFAULT_LOCALE;
+  return DEFAULT_LOCALE;
 }
 
 export async function getT(): Promise<T> {
-  return traducteur(await getLang());
+  return traducteur(DEFAULT_LOCALE);
 }
 
-/** Langue dans une Server Action (root-params n'y est pas disponible) : cookie posé par le proxy. */
+/** Langue dans une Server Action : français. */
 export async function getLangAction(): Promise<Locale> {
-  const l = (await cookies()).get("NEXT_LOCALE")?.value;
-  return l && hasLocale(l) ? l : DEFAULT_LOCALE;
+  return DEFAULT_LOCALE;
 }
 
 export async function getTAction(): Promise<T> {
-  return traducteur(await getLangAction());
+  return traducteur(DEFAULT_LOCALE);
 }

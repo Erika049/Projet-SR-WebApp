@@ -1,34 +1,71 @@
 "use server";
-// Actions « scolarité » (secrétariat ; validation des corrections d'identité par la direction).
+// Secrétariat : inscription d'un élève, affectation en classe, tuteurs et codes de liaison (CU-SEC-01/03/04/05).
+import { redirect } from "next/navigation";
 import { refresh } from "next/cache";
-import { ecrire } from "@/lib/api/client";
+import * as b from "@/lib/api/backend";
 import { messageErreur } from "@/lib/api/errors";
 import { exigerRole } from "@/lib/auth/dal";
 import { getLangAction, getTAction } from "@/lib/i18n/server";
-import { echec, erreursZod, lireFormulaire, type EtatFormulaire } from "@/lib/actions";
-import * as m from "@/lib/api/mock/scolarite";
-import { schemaCorrection, schemaInscription } from "./schemas";
+import { echec, type EtatFormulaire } from "@/lib/actions";
+
+const texte = (fd: FormData, cle: string) => String(fd.get(cle) ?? "").trim();
 
 export async function inscrireEleve(_: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
-  const s = await exigerRole("secretariat");
+  await exigerRole("secretariat", "direction");
   const t = await getTAction();
-  const res = schemaInscription.safeParse(lireFormulaire(fd));
-  if (!res.success) return echec(t("Vérifiez les champs signalés.", "Please check the highlighted fields."), erreursZod(res.error));
-  try {
-    const r = await ecrire(() => m.inscrire(res.data, s.nomAffiche), "/eleves", "POST", res.data);
-    refresh();
-    return { ok: true, message: t(`Élève enregistré : matricule ${r.matricule}.`, `Student saved: ID ${r.matricule}.`), donnees: r };
-  } catch (e) {
-    return echec(messageErreur(e, await getLangAction()));
+  const lang = await getLangAction();
+  const erreurs: Record<string, string> = {};
+  const donnees = {
+    nom: texte(fd, "nom"),
+    prenom: texte(fd, "prenom"),
+    sexe: texte(fd, "sexe"),
+    dateNaissance: texte(fd, "dateNaissance"),
+    lieuNaissance: texte(fd, "lieuNaissance") || null,
+    nationalite: texte(fd, "nationalite") || null,
+    classeId: texte(fd, "classeId") || null,
+    matricule: texte(fd, "matricule"),
+    type: texte(fd, "type") || "NOUVEAU",
+    redoublant: fd.get("redoublant") === "on",
+  };
+  if (!donnees.nom) erreurs.nom = t("Obligatoire.", "Required.");
+  if (!donnees.prenom) erreurs.prenom = t("Obligatoire.", "Required.");
+  if (donnees.sexe !== "M" && donnees.sexe !== "F") erreurs.sexe = t("Choisissez.", "Choose.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(donnees.dateNaissance)) erreurs.dateNaissance = t("Date invalide.", "Invalid date.");
+  if (!donnees.matricule) erreurs.matricule = t("Obligatoire.", "Required.");
+  const tuteur = {
+    prenom: texte(fd, "tuteurPrenom"),
+    nom: texte(fd, "tuteurNom"),
+    telephone: texte(fd, "tuteurTelephone") || null,
+    email: null,
+    lien: texte(fd, "tuteurLien") || "AUTRE",
+    peutPayer: true,
+    peutJustifier: true,
+  };
+  const avecTuteur = Boolean(tuteur.prenom || tuteur.nom || tuteur.telephone);
+  if (avecTuteur && (!tuteur.prenom || !tuteur.nom || !tuteur.telephone)) {
+    erreurs.tuteurTelephone = t("Prénom, nom et téléphone du tuteur sont nécessaires.", "Guardian first name, last name and phone are required.");
   }
+  if (Object.keys(erreurs).length) return echec(t("Vérifiez les champs signalés.", "Please check the highlighted fields."), erreurs);
+
+  let eleveId: string;
+  try {
+    const annee = await b.anneeCourante();
+    if (!annee) return echec(t("Aucune année scolaire courante n'est définie (Paramétrage).", "No current school year is set (Settings)."));
+    eleveId = (await b.inscrire({ ...donnees, anneeScolaireId: annee.id })).eleveId;
+    if (avecTuteur) await b.enregistrerTuteur(eleveId, tuteur);
+  } catch (e) {
+    return echec(messageErreur(e, lang));
+  }
+  redirect(`/${lang}/secretariat/eleves/${eleveId}?inscrit=1`);
 }
 
 export async function affecterClasse(eleveId: string, _: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
-  const s = await exigerRole("secretariat");
+  await exigerRole("secretariat", "direction");
   const t = await getTAction();
-  const classeId = String(fd.get("classeId") ?? "");
+  const classeId = texte(fd, "classeId");
+  if (!classeId) return echec(t("Choisissez une classe.", "Choose a class."));
   try {
-    await ecrire(() => m.affecterClasse(eleveId, classeId, s.nomAffiche), `/eleves/${eleveId}/classe`, "PUT", { classeId });
+    await b.affecterClasse(eleveId, classeId);
     refresh();
     return { ok: true, message: t("Classe mise à jour.", "Class updated.") };
   } catch (e) {
@@ -36,89 +73,42 @@ export async function affecterClasse(eleveId: string, _: EtatFormulaire, fd: For
   }
 }
 
-export async function demanderCorrection(eleveId: string, _: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
-  const s = await exigerRole("secretariat");
+/** Tuteur avec un compte : lien direct. Sans compte : un code de liaison est généré pour l'application mobile. */
+export async function ajouterTuteur(eleveId: string, _: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
+  await exigerRole("secretariat", "direction");
   const t = await getTAction();
-  const res = schemaCorrection.safeParse(lireFormulaire(fd));
-  if (!res.success) return echec(t("Vérifiez les champs signalés.", "Please check the highlighted fields."), erreursZod(res.error));
+  const tuteur = {
+    prenom: texte(fd, "prenom"),
+    nom: texte(fd, "nom"),
+    telephone: texte(fd, "telephone") || null,
+    email: texte(fd, "email") || null,
+    lien: texte(fd, "lien") || "AUTRE",
+    peutPayer: fd.get("peutPayer") === "on",
+    peutJustifier: fd.get("peutJustifier") === "on",
+  };
+  if (!tuteur.prenom || !tuteur.nom || (!tuteur.telephone && !tuteur.email)) {
+    return echec(t("Prénom, nom et téléphone (ou courriel) sont obligatoires.", "First name, last name and phone (or email) are required."));
+  }
   try {
-    const r = await ecrire(() => m.demanderCorrection(eleveId, res.data.champ, res.data.valeur, s.nomAffiche), `/eleves/${eleveId}/corrections`, "POST", res.data);
+    const r = await b.enregistrerTuteur(eleveId, tuteur);
     refresh();
-    return {
-      ok: true,
-      message: r.identite
-        ? t("Correction d'identité envoyée au directeur pour validation.", "Identity correction sent to the principal for approval.")
-        : t("Correction appliquée et historisée.", "Correction applied and logged."),
-    };
+    return r.code
+      ? {
+          ok: true,
+          message: t(
+            `Le tuteur n'a pas encore de compte : remettez-lui le code de liaison ${r.code.code} (à saisir dans l'application mobile).`,
+            `The guardian has no account yet: give them the link code ${r.code.code} (to enter in the mobile app).`,
+          ),
+          donnees: { code: r.code.code },
+        }
+      : { ok: true, message: t("Le tuteur avait déjà un compte : il est lié à l'élève.", "The guardian already had an account: they are linked to the student.") };
   } catch (e) {
     return echec(messageErreur(e, await getLangAction()));
   }
 }
 
-/** Secrétariat : accepter (ou transmettre au directeur) / refuser une demande de correction. */
-export async function traiterCorrection(id: string, decision: "accepter" | "refuser") {
-  const s = await exigerRole("secretariat", "direction");
-  await ecrire(() => m.traiterCorrection(id, decision, s.nomAffiche, s.role === "direction"), `/corrections/${id}/${decision}`, "POST");
+export async function traiterLiaison(id: string, eleveId: string, decision: "accepter" | "refuser") {
+  await exigerRole("secretariat", "direction");
+  await b.traiterLiaison(id, eleveId, decision);
   refresh();
-}
-
-export async function completerPiece(eleveId: string, piece: string) {
-  const s = await exigerRole("secretariat");
-  await ecrire(() => m.completerPiece(eleveId, piece, s.nomAffiche), `/eleves/${eleveId}/pieces`, "POST", { piece });
-  refresh();
-}
-
-export async function regenererCode(eleveId: string) {
-  const s = await exigerRole("secretariat");
-  await ecrire(() => m.regenererCode(eleveId, s.nomAffiche), `/eleves/${eleveId}/code-liaison`, "POST");
-  refresh();
-}
-
-export async function archiverDossier(eleveId: string, _: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
-  const s = await exigerRole("secretariat");
-  const t = await getTAction();
-  const motif = String(fd.get("motif") ?? "").trim();
-  if (!motif) return echec(t("Le motif de sortie est obligatoire.", "Exit reason is required."));
-  await ecrire(() => m.archiver(eleveId, motif, s.nomAffiche), `/eleves/${eleveId}/sortie`, "POST", { motif });
-  refresh();
-  return { ok: true, message: t("Dossier archivé.", "File archived.") };
-}
-
-export async function reinscrire(eleveId: string, fd: FormData) {
-  const s = await exigerRole("secretariat");
-  const classeId = String(fd.get("classeId") ?? "");
-  if (!classeId) return;
-  await ecrire(() => m.reinscrire(eleveId, classeId, s.nomAffiche), `/reinscriptions`, "POST", { eleveId, classeId });
-  refresh();
-}
-
-export async function importerEleves(_: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
-  const s = await exigerRole("secretariat");
-  const t = await getTAction();
-  const etape = String(fd.get("etape") ?? "analyser");
-  const fichier = fd.get("fichier");
-  let contenu = String(fd.get("contenu") ?? "");
-  if (fichier instanceof File && fichier.size > 0) {
-    if (fichier.size > 2_000_000) return echec(t("Fichier trop volumineux (2 Mo max).", "File too large (2 MB max)."));
-    contenu = await fichier.text();
-  }
-  if (!contenu.trim()) return echec(t("Choisissez un fichier CSV.", "Choose a CSV file."));
-  if (etape === "analyser") {
-    const lignes = m.analyserImport(contenu);
-    return {
-      ok: true,
-      donnees: { contenu, lignes: JSON.stringify(lignes), nom: fichier instanceof File ? fichier.name : "import.csv" },
-    };
-  }
-  try {
-    const r = await ecrire(() => m.importer(contenu, s.nomAffiche), "/eleves/import", "POST", { contenu });
-    refresh();
-    return {
-      ok: true,
-      message: t(`${r.importes} élève(s) importé(s).`, `${r.importes} student(s) imported.`) + (r.doublons ? t(` ${r.doublons} doublon(s) ignoré(s).`, ` ${r.doublons} duplicate(s) skipped.`) : ""),
-      donnees: { termine: 1 },
-    };
-  } catch (e) {
-    return echec(messageErreur(e, await getLangAction()));
-  }
 }

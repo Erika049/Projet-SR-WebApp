@@ -1,115 +1,75 @@
 "use server";
-// Économat (CU-ECO-01..09) et pilotage financier de la direction (CU-DIR-04, CU-DIR-07).
+// Économat : encaissement avec reçu, annulation, relances des impayés, déclarations des parents (CU-ECO-01..08).
 import { redirect } from "next/navigation";
 import { refresh } from "next/cache";
-import { ecrire } from "@/lib/api/client";
+import * as b from "@/lib/api/backend";
 import { messageErreur } from "@/lib/api/errors";
 import { exigerRole } from "@/lib/auth/dal";
 import { getLangAction, getTAction } from "@/lib/i18n/server";
-import { echec, erreursZod, lireFormulaire, type EtatFormulaire } from "@/lib/actions";
-import * as m from "@/lib/api/mock/finances";
-import { schemaPaiement, schemaRemise, schemaTarif } from "./schemas";
+import { echec, type EtatFormulaire } from "@/lib/actions";
 
-export async function enregistrerPaiement(_: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
-  const s = await exigerRole("comptable");
+const MODES = ["ESPECES", "MOBILE_MONEY", "VIREMENT", "CHEQUE"] as const;
+
+export async function enregistrerPaiement(eleveId: string, _: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
+  await exigerRole("comptable", "direction");
   const t = await getTAction();
   const lang = await getLangAction();
-  const res = schemaPaiement.safeParse(lireFormulaire(fd));
-  if (!res.success) return echec(t("Vérifiez les champs signalés.", "Please check the highlighted fields."), erreursZod(res.error));
+  const montant = Number(String(fd.get("montant") ?? "").replace(/[\s ]/g, "").replace(",", "."));
+  const mode = String(fd.get("mode") ?? "") as (typeof MODES)[number];
+  const reference = String(fd.get("reference") ?? "").trim() || null;
+  const date = String(fd.get("date") ?? "");
+  const erreurs: Record<string, string> = {};
+  if (!(montant > 0)) erreurs.montant = t("Montant invalide.", "Invalid amount.");
+  if (!MODES.includes(mode)) erreurs.mode = t("Choisissez le mode.", "Choose the method.");
+  if (mode !== "ESPECES" && !reference) erreurs.reference = t("Référence de la transaction obligatoire.", "Transaction reference required.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) erreurs.date = t("Date invalide.", "Invalid date.");
+  if (Object.keys(erreurs).length) return echec(t("Vérifiez les champs signalés.", "Please check the highlighted fields."), erreurs);
   let id: string;
   try {
-    ({ id } = await ecrire(() => m.enregistrerPaiement(res.data, s.nomAffiche), "/finances/paiements", "POST", res.data));
+    id = (await b.enregistrerPaiement(eleveId, { montant, mode, reference, date })).id;
   } catch (e) {
     return echec(messageErreur(e, lang));
   }
   redirect(`/${lang}/comptabilite/paiements/${id}?nouveau=1`);
 }
 
-export async function demanderAnnulation(id: string, _: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
-  const s = await exigerRole("comptable");
+export async function annulerPaiement(eleveId: string, paiementId: string, _: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
+  await exigerRole("comptable", "direction");
   const t = await getTAction();
   const motif = String(fd.get("motif") ?? "").trim();
-  if (motif.length < 5) return echec(t("Indiquez un motif précis.", "Give a precise reason."));
+  if (!motif) return echec(t("Indiquez le motif de l'annulation.", "Give the reason for the cancellation."));
   try {
-    await ecrire(() => m.demanderAnnulation(id, motif, s.nomAffiche), `/finances/paiements/${id}/annulation`, "POST", { motif });
+    await b.annulerPaiement(eleveId, paiementId, motif);
     refresh();
-    return { ok: true, message: t("Demande d'annulation envoyée à la direction.", "Cancellation request sent to management.") };
+    return { ok: true, message: t("Paiement annulé. Les parents sont prévenus.", "Payment cancelled. The parents are notified.") };
   } catch (e) {
     return echec(messageErreur(e, await getLangAction()));
   }
 }
 
-export async function traiterAnnulation(id: string, decision: "valider" | "refuser") {
-  const s = await exigerRole("direction");
-  await ecrire(() => m.traiterAnnulation(id, decision, s.nomAffiche), `/finances/paiements/${id}/annulation/${decision}`, "POST");
-  refresh();
-}
-
-export async function envoyerRecu(id: string) {
-  const s = await exigerRole("comptable");
-  await ecrire(() => m.envoyerRecu(id, s.nomAffiche), `/finances/paiements/${id}/recu/envoyer`, "POST");
-  refresh();
-}
-
-export async function traiterDeclaration(id: string, decision: "valider" | "rejeter") {
-  const s = await exigerRole("comptable");
-  await ecrire(() => m.traiterDeclaration(id, decision, s.nomAffiche), `/finances/declarations/${id}/${decision}`, "POST");
-  refresh();
-}
-
-export async function relancerParent(eleveId: string) {
-  const s = await exigerRole("comptable");
-  await ecrire(() => m.relancer([eleveId], s.nomAffiche), "/finances/relances", "POST", { eleveIds: [eleveId] });
-  refresh();
-}
-
-export async function relancerTous() {
-  const s = await exigerRole("comptable");
-  await ecrire(() => m.relancerTous(s.nomAffiche), "/finances/relances/tous", "POST");
-  refresh();
-}
-
-export async function cloturerCaisse() {
-  const s = await exigerRole("comptable");
-  await ecrire(() => m.cloturerCaisse(s.nomAffiche), "/finances/caisse/cloturer", "POST");
-  refresh();
-}
-
-export async function appliquerRemise(eleveId: string, fd: FormData) {
-  const s = await exigerRole("comptable");
-  const remiseId = String(fd.get("remiseId") ?? "") || null;
-  await ecrire(() => m.appliquerRemise(eleveId, remiseId, s.nomAffiche), `/finances/eleves/${eleveId}/remise`, "PUT", { remiseId });
-  refresh();
-}
-
-export async function enregistrerTarif(_: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
-  const s = await exigerRole("direction");
+export async function relancerImpayes(_: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
+  await exigerRole("comptable", "direction");
   const t = await getTAction();
-  const libelles = fd.getAll("vLibelle").map(String);
-  const montants = fd.getAll("vMontant").map(String);
-  const dates = fd.getAll("vDate").map(String);
-  const brut = {
-    niveau: fd.get("niveau"),
-    montant: fd.get("montant"),
-    versements: libelles.map((libelle, i) => ({ libelle, montant: montants[i], dateLimite: dates[i] })).filter((v) => v.libelle && v.montant),
-  };
-  const res = schemaTarif.safeParse(brut);
-  if (!res.success) return echec(t("Vérifiez les montants et les dates.", "Check amounts and dates."), erreursZod(res.error));
+  const eleveId = String(fd.get("eleveId") ?? "");
   try {
-    await ecrire(() => m.enregistrerTarif(res.data, s.nomAffiche), `/finances/tarifs/${encodeURIComponent(res.data.niveau)}`, "PUT", res.data);
+    const r = await b.relancerImpayes(eleveId ? [eleveId] : undefined);
     refresh();
-    return { ok: true, message: t("Échéancier enregistré.", "Schedule saved.") };
+    return {
+      ok: true,
+      message: t(
+        `${r.notificationsEnvoyees} relance(s) envoyée(s) à ${r.elevesRelances} famille(s).${r.elevesSansParentLie ? ` ${r.elevesSansParentLie} élève(s) sans parent lié.` : ""}`,
+        `${r.notificationsEnvoyees} reminder(s) sent to ${r.elevesRelances} family(ies).${r.elevesSansParentLie ? ` ${r.elevesSansParentLie} student(s) without a linked parent.` : ""}`,
+      ),
+    };
   } catch (e) {
     return echec(messageErreur(e, await getLangAction()));
   }
 }
 
-export async function enregistrerRemise(_: EtatFormulaire, fd: FormData): Promise<EtatFormulaire> {
-  const s = await exigerRole("direction");
-  const t = await getTAction();
-  const res = schemaRemise.safeParse(lireFormulaire(fd));
-  if (!res.success) return echec(t("Vérifiez les champs signalés.", "Please check the highlighted fields."), erreursZod(res.error));
-  await ecrire(() => m.enregistrerRemise(res.data, s.nomAffiche), "/finances/remises", "PUT", res.data);
+/** Valider émet le reçu (paiement enregistré) ; rejeter transmet [fd].motif au parent. */
+export async function traiterDeclaration(id: string, decision: "valider" | "rejeter", fd?: FormData) {
+  await exigerRole("comptable");
+  const motif = String(fd?.get("motif") ?? "").trim();
+  await b.traiterDeclaration(id, decision, motif);
   refresh();
-  return { ok: true, message: t("Remise enregistrée.", "Discount saved.") };
 }

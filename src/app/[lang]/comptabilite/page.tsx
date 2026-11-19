@@ -1,87 +1,63 @@
-// Route : /[lang]/comptabilite — Tableau de bord comptable : encaissements du jour (CU-ECO-08).
+// Route : /[lang]/comptabilite — Tableau de bord comptable : caisse du jour, déclarations, impayés (CU-ECO-08).
 import Link from "next/link";
-import { Banknote, Landmark, Smartphone, Wallet } from "lucide-react";
+import { FileText, Receipt, Search, AlertTriangle } from "lucide-react";
+import { getCurrentUser } from "@/lib/auth/dal";
 import { getLang, getT } from "@/lib/i18n/server";
-import { dateLongue, fcfa, heure, nombre } from "@/lib/format";
+import { aujourdhuiIso, fcfa } from "@/lib/format";
 import { MODE_PAIEMENT, lib } from "@/lib/labels";
-import { tableauComptable } from "@/features/tableaux-de-bord/queries";
-import { cloturerCaisse } from "@/features/finances/actions";
+import { MODES, impayes as lireImpayes, journalCaisse, listerDeclarations } from "@/lib/api/backend";
 import { PageBody, PageHeader } from "@/components/layout/page-header";
 import { Card, CardHeader } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { ButtonLink } from "@/components/ui/button";
-import { LigneVide, Table, Td, Th } from "@/components/ui/data-table";
 import { GrilleStats, StatCard } from "@/components/ui/stat-card";
-import { Personne } from "@/components/ui/avatar";
-import { ActionButton } from "@/components/ui/action-button";
+import { LigneVide, Table, Td, Th } from "@/components/ui/data-table";
 
 export default async function TableauComptablePage() {
-  const [t, lang, d] = await Promise.all([getT(), getLang(), tableauComptable()]);
-  const c = d.caisse;
-  const n = (x: number) => t(`${x} paiement${x > 1 ? "s" : ""}`, `${x} payment${x > 1 ? "s" : ""}`);
+  const jour = aujourdhuiIso();
+  const [t, lang, session, caisse, declarations, impayes] = await Promise.all([getT(), getLang(), getCurrentUser(), journalCaisse(jour, jour), listerDeclarations(), lireImpayes()]);
+  const valides = caisse.filter((p) => p.statut === "VALIDE");
+  const base = `/${lang}/comptabilite`;
+  const actions = [
+    [t("Enregistrer un paiement", "Record a payment"), `${base}/paiements/nouveau`, Receipt],
+    [t("Vérifier les déclarations", "Check declarations"), `${base}/declarations`, FileText],
+    [t("Situation d'un élève", "Student account"), `${base}/situation`, Search],
+    [t("Impayés et relances", "Arrears and reminders"), `${base}/impayes`, AlertTriangle],
+  ] as const;
   return (
     <>
-      <PageHeader
-        titre={t("Tableau de bord", "Dashboard")}
-        sousTitre={dateLongue(c.date, lang)}
-        actions={
-          c.cloture ? (
-            <Badge ton="navy">{t("Caisse clôturée", "Register closed")}</Badge>
-          ) : (
-            <ActionButton action={cloturerCaisse} taille="md" confirmation={t(`Clôturer la caisse du jour (${fcfa(c.total, lang)}) ?`, `Close today's register (${fcfa(c.total, lang)})?`)}>
-              {t("Clôturer la caisse", "Close the register")}
-            </ActionButton>
-          )
-        }
-      />
+      <PageHeader titre={t("Tableau de bord", "Dashboard")} sousTitre={`${t("Bonjour", "Hello")} ${session.nomAffiche}${session.etablissementNom ? ` · ${session.etablissementNom}` : ""}`} />
       <PageBody>
         <GrilleStats>
-          <StatCard libelle={t("Espèces", "Cash")} valeur={nombre(c.especes.montant, lang)} detail={`FCFA · ${n(c.especes.nombre)}`} icone={<Banknote className="size-5" />} ton="succes" />
-          <StatCard libelle="Mobile Money" valeur={nombre(c.mobile.montant, lang)} detail={`FCFA · ${n(c.mobile.nombre)}`} icone={<Smartphone className="size-5" />} ton="alerte" />
-          <StatCard libelle={t("Virements", "Transfers")} valeur={nombre(c.virements.montant, lang)} detail={`FCFA · ${n(c.virements.nombre)}`} icone={<Landmark className="size-5" />} />
-          <StatCard libelle={t("Total du jour", "Today's total")} valeur={nombre(c.total, lang)} detail="FCFA" icone={<Wallet className="size-5" />} />
+          <StatCard libelle={t("Caisse du jour", "Today's cash")} valeur={fcfa(valides.reduce((s, p) => s + Number(p.montant), 0), lang)} detail={t(`${valides.length} paiements`, `${valides.length} payments`)} ton="succes" />
+          <StatCard libelle={t("Déclarations à vérifier", "Declarations to check")} valeur={declarations.length} detail={t("Envoyées par les parents", "Sent by parents")} ton="alerte" />
+          <StatCard libelle={t("Élèves en impayé", "Students in arrears")} valeur={impayes.length} detail={fcfa(impayes.reduce((s, i) => s + Number(i.solde), 0), lang)} ton="danger" />
         </GrilleStats>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Link href={`/${lang}/comptabilite/declarations`} className="rounded-2xl border border-line bg-white p-4 hover:border-navy-200">
-            <p className="text-sm text-muted">{t("Déclarations à vérifier", "Declarations to verify")}</p>
-            <p className="text-2xl font-bold text-navy-800">{d.declarations}</p>
-          </Link>
-          <Link href={`/${lang}/comptabilite/impayes`} className="rounded-2xl border border-line bg-white p-4 hover:border-navy-200">
-            <p className="text-sm text-muted">{t("Élèves en impayé", "Students in arrears")}</p>
-            <p className="text-2xl font-bold text-red-600">{d.impayes.nombre} <span className="text-sm font-medium text-muted">· {fcfa(d.impayes.montant, lang)}</span></p>
-          </Link>
-        </div>
         <Card>
-          <CardHeader
-            titre={t("Paiements du jour", "Today's payments")}
-            action={<ButtonLink href={`/api/exports/paiements-du-jour?lang=${lang}`} variante="secondaire" taille="sm" prefetch={false}>{t("Exporter Excel", "Export Excel")}</ButtonLink>}
-          />
+          <CardHeader titre={t("Actions rapides", "Quick actions")} />
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {actions.map(([libelle, href, Icone]) => (
+              <Link key={libelle} href={href} className="flex items-center gap-3 rounded-xl border border-line p-4 font-semibold text-navy-800 transition hover:border-navy-200 hover:bg-navy-50">
+                <span className="grid size-10 place-items-center rounded-lg bg-navy-50 text-navy-700"><Icone className="size-5" /></span>
+                {libelle}
+              </Link>
+            ))}
+          </div>
+        </Card>
+        <Card>
+          <CardHeader titre={t("Paiements du jour", "Today's payments")} />
           <Table>
-            <thead>
-              <tr>
-                <Th>{t("Heure", "Time")}</Th>
-                <Th>{t("Élève", "Student")}</Th>
-                <Th>{t("Classe", "Class")}</Th>
-                <Th>{t("Mode", "Method")}</Th>
-                <Th>{t("Montant", "Amount")}</Th>
-                <Th>{t("Reçu", "Receipt")}</Th>
-              </tr>
-            </thead>
+            <thead><tr><Th>{t("Reçu", "Receipt")}</Th><Th>{t("Élève", "Student")}</Th><Th>{t("Montant", "Amount")}</Th><Th>{t("Mode", "Method")}</Th></tr></thead>
             <tbody>
-              {c.paiements.length === 0 && <LigneVide colSpan={6} texte={t("Aucun paiement aujourd'hui.", "No payments today.")} />}
-              {c.paiements.map((p) => (
+              {caisse.length === 0 && <LigneVide colSpan={4} texte={t("Aucun paiement aujourd'hui.", "No payment today.")} />}
+              {caisse.map((p) => (
                 <tr key={p.id}>
-                  <Td className="font-mono">{heure(p.date)}</Td>
-                  <Td><Personne nom={`${p.eleve.prenom} ${p.eleve.nom}`} /></Td>
-                  <Td>{p.classe.libelle}</Td>
-                  <Td>{lib(MODE_PAIEMENT, p.mode, t)}</Td>
-                  <Td className="font-semibold">{fcfa(p.montant, lang)}</Td>
-                  <Td><Link href={`/${lang}/comptabilite/paiements/${p.id}`} className="font-mono text-xs font-semibold text-navy-700 hover:underline">{p.numeroRecu}</Link></Td>
+                  <Td><Link href={`${base}/paiements/${p.id}`} className="font-mono text-xs text-navy-700 hover:underline">{p.numeroRecu}</Link></Td>
+                  <Td>{p.elevePrenom} {p.eleveNom}</Td>
+                  <Td className="font-semibold">{fcfa(Number(p.montant), lang)}</Td>
+                  <Td>{lib(MODE_PAIEMENT, MODES[p.mode], t)}</Td>
                 </tr>
               ))}
             </tbody>
           </Table>
-          <p className="mt-3 text-xs text-muted">{t("Toute annulation exige un motif et une validation de la direction.", "Every cancellation requires a reason and management approval.")}</p>
         </Card>
       </PageBody>
     </>

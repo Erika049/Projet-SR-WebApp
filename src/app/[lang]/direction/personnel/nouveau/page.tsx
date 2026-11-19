@@ -1,21 +1,22 @@
 // Route : /[lang]/direction/personnel/nouveau — Ajouter un membre du personnel (CU-DIR-03).
 import { getLang, getT } from "@/lib/i18n/server";
-import { listerClasses, parametrage } from "@/features/parametrage/queries";
-import { prochainMatricule } from "@/features/personnel/queries";
-import { MembreForm } from "@/features/personnel/components/membre-form";
+import { ajouterMembre } from "@/features/personnel/actions";
+import { ChampsMembre } from "@/features/personnel/components/champs-membre";
 import { PageBody, PageHeader } from "@/components/layout/page-header";
+import { Card } from "@/components/ui/card";
+import { Formulaire } from "@/components/ui/formulaire";
 
-export default async function AjouterMembrePage() {
-  const [t, lang, classes, p, matricule] = await Promise.all([getT(), getLang(), listerClasses(), parametrage(), prochainMatricule()]);
+export default async function NouveauMembrePage() {
+  const [t, lang] = await Promise.all([getT(), getLang()]);
   return (
     <>
-      <PageHeader
-        titre={t("Ajouter un membre du personnel", "Add a staff member")}
-        filAriane={[{ href: `/${lang}/direction/personnel`, libelle: t("Personnel", "Staff") }]}
-        sousTitre={t("Les champs d'identité et la fonction sont obligatoires.", "Identity fields and role are required.")}
-      />
+      <PageHeader titre={t("Ajouter un membre", "Add a member")} filAriane={[{ href: `/${lang}/direction/personnel`, libelle: t("Personnel", "Staff") }]} />
       <PageBody>
-        <MembreForm classes={classes.map((c) => ({ id: c.id, libelle: c.libelle }))} matieres={p.matieres.map((m) => m.libelle)} matricule={matricule} />
+        <Card className="max-w-2xl">
+          <Formulaire action={ajouterMembre.bind(null, null)} libelle={t("Créer le compte", "Create account")}>
+            <ChampsMembre />
+          </Formulaire>
+        </Card>
       </PageBody>
     </>
   );

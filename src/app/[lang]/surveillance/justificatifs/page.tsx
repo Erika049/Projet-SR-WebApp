@@ -4,7 +4,7 @@ import { getLang, getT } from "@/lib/i18n/server";
 import { jourMois } from "@/lib/format";
 import { STATUT_JUSTIFICATIF, lib, ton } from "@/lib/labels";
 import { premier } from "@/lib/utils";
-import { listerJustificatifs } from "@/features/justificatifs/queries";
+import { listerJustificatifs } from "@/lib/api/backend";
 import { traiterJustificatif } from "@/features/justificatifs/actions";
 import { PageBody, PageHeader } from "@/components/layout/page-header";
 import { Card } from "@/components/ui/card";
@@ -14,6 +14,7 @@ import { Tabs } from "@/components/ui/tabs";
 import { Personne } from "@/components/ui/avatar";
 import { ActionButton } from "@/components/ui/action-button";
 import { Dialog } from "@/components/ui/dialog";
+import { SubmitButton } from "@/components/ui/submit-button";
 
 export default async function JustificatifsPage({ searchParams }: PageProps<"/[lang]/surveillance/justificatifs">) {
   const [sp, t, lang] = await Promise.all([searchParams, getT(), getLang()]);
@@ -51,9 +52,17 @@ export default async function JustificatifsPage({ searchParams }: PageProps<"/[l
                   <Td><Personne nom={`${j.eleve.prenom} ${j.eleve.nom}`} /></Td>
                   <Td>{j.eleve.classe.libelle}</Td>
                   <Td className="whitespace-nowrap">{jourMois(j.dateAbsence, lang)} · {j.heures}</Td>
-                  <Td>{j.motif}</Td>
                   <Td>
-                    {j.piece ? (
+                    {j.motif}
+                    {j.parent && <p className="text-xs text-muted">{t("Déposé par", "Sent by")} {j.parent}</p>}
+                    {j.commentaire && <p className="text-xs text-muted">{t("Commentaire", "Comment")} : {j.commentaire}</p>}
+                  </Td>
+                  <Td>
+                    {j.piece && j.pieceUrl ? (
+                      <a href={j.pieceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm font-semibold text-navy-700 hover:underline">
+                        <Paperclip className="size-3.5" /> {j.piece}
+                      </a>
+                    ) : j.piece ? (
                       <Dialog declencheur={<><Paperclip className="size-3.5" /> {j.piece}</>} titre={j.piece} variante="fantome">
                         <div className="grid h-64 place-items-center rounded-xl border border-dashed border-line bg-slate-50 text-sm text-muted">
                           {t("Aperçu du document (stockage sécurisé des pièces justificatives)", "Document preview (secure attachment storage)")}
@@ -68,7 +77,17 @@ export default async function JustificatifsPage({ searchParams }: PageProps<"/[l
                       <Badge ton={ton(STATUT_JUSTIFICATIF, j.statut)}>{lib(STATUT_JUSTIFICATIF, j.statut, t)}</Badge>
                     ) : (
                       <div className="flex justify-end gap-1.5">
-                        <ActionButton action={traiterJustificatif.bind(null, j.id, "refuse")} variante="danger">{t("Refuser", "Reject")}</ActionButton>
+                        <Dialog declencheur={t("Refuser", "Reject")} titre={t("Refuser le justificatif", "Reject the absence note")} variante="danger">
+                          <form action={traiterJustificatif.bind(null, j.id, "refuse")} className="space-y-3">
+                            <label className="block text-sm font-medium text-ink" htmlFor={`commentaire-${j.id}`}>
+                              {t("Commentaire pour le parent (facultatif)", "Comment for the parent (optional)")}
+                            </label>
+                            <textarea id={`commentaire-${j.id}`} name="commentaire" rows={3} maxLength={1000} className="w-full rounded-lg border border-line px-3 py-2 text-sm" />
+                            <div className="flex justify-end">
+                              <SubmitButton variante="danger" taille="sm">{t("Confirmer le refus", "Confirm rejection")}</SubmitButton>
+                            </div>
+                          </form>
+                        </Dialog>
                         <ActionButton action={traiterJustificatif.bind(null, j.id, "accepte")} variante="succes">{t("Valider", "Approve")}</ActionButton>
                       </div>
                     )}

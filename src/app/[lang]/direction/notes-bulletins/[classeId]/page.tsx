@@ -1,77 +1,58 @@
-// Route : /[lang]/direction/notes-bulletins/[classeId] — Aperçu des bulletins d'une classe (CU-DIR-05, CU-SYS-02).
+// Route : /[lang]/direction/notes-bulletins/[classeId]?periode= — Moyennes par matière, moyenne générale et rang.
 import { notFound } from "next/navigation";
 import { getLang, getT } from "@/lib/i18n/server";
-import { nombre } from "@/lib/format";
-import { STATUT_BULLETIN, lib, ton } from "@/lib/labels";
 import { premier } from "@/lib/utils";
-import { apercuBulletins } from "@/features/notes-bulletins/queries";
-import { publierClasse, validerClasse } from "@/features/notes-bulletins/actions";
+import { anneeCourante, classes as lireClasses, periodes as lirePeriodes, resultats } from "@/lib/api/backend";
 import { PageBody, PageHeader } from "@/components/layout/page-header";
-import { Card, CardHeader } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Table, Td, Th } from "@/components/ui/data-table";
-import { StatCard } from "@/components/ui/stat-card";
-import { ActionButton } from "@/components/ui/action-button";
+import { Card } from "@/components/ui/card";
+import { LigneVide, Table, Td, Th } from "@/components/ui/data-table";
+import { Tabs } from "@/components/ui/tabs";
 
-export default async function ApercuBulletinsPage({ params, searchParams }: PageProps<"/[lang]/direction/notes-bulletins/[classeId]">) {
+export default async function ResultatsClassePage({ params, searchParams }: PageProps<"/[lang]/direction/notes-bulletins/[classeId]">) {
   const [{ classeId }, sp, t, lang] = await Promise.all([params, searchParams, getT(), getLang()]);
-  const sequence = Number(premier(sp.sequence)) || 1;
-  const a = await apercuBulletins(classeId, sequence);
-  if (!a) notFound();
-  const n2 = (v: number) => nombre(v, lang, 2);
-
+  const classe = (await lireClasses()).find((c) => c.id === classeId);
+  if (!classe) notFound();
+  const annee = await anneeCourante();
+  const periodes = annee ? (await lirePeriodes(annee.id)).filter((p) => p.type !== "ANNUELLE") : [];
+  const periode = periodes.find((p) => p.id === premier(sp.periode));
+  const r = await resultats(classeId, periode?.id);
+  const base = `/${lang}/direction/notes-bulletins/${classeId}`;
+  const note = (v: number | null | undefined) => (v === null || v === undefined ? "—" : Number(v).toFixed(2));
   return (
     <>
-      <PageHeader
-        titre={`${t("Bulletins", "Report cards")} · ${a.classe.libelle}`}
-        filAriane={[{ href: `/${lang}/direction/notes-bulletins`, libelle: t("Notes et bulletins", "Marks and report cards") }]}
-        sousTitre={t(`Séquence ${sequence} · moyennes et rangs calculés automatiquement`, `Sequence ${sequence} · averages and ranks computed automatically`)}
-        actions={
-          <>
-            <Badge ton={ton(STATUT_BULLETIN, a.statut)}>{lib(STATUT_BULLETIN, a.statut, t)}</Badge>
-            {a.statut === "a_valider" && <ActionButton action={validerClasse.bind(null, a.classe.id, sequence)} variante="primaire" taille="md">{t("Valider", "Approve")}</ActionButton>}
-            {(a.statut === "a_valider" || a.statut === "valide") && (
-              <ActionButton action={publierClasse.bind(null, a.classe.id, sequence)} variante="succes" taille="md" confirmation={t("Publier ? Les parents seront notifiés.", "Publish? Parents will be notified.")}>
-                {t("Publier", "Publish")}
-              </ActionButton>
-            )}
-          </>
-        }
-      />
+      <PageHeader titre={t(`Résultats · ${classe.nom}`, `Results · ${classe.nom}`)} filAriane={[{ href: `/${lang}/direction/notes-bulletins`, libelle: t("Notes et résultats", "Marks and results") }]} />
       <PageBody>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard libelle={t("Moyenne de la classe", "Class average")} valeur={n2(a.stats.moyenneClasse)} />
-          <StatCard libelle={t("Premier", "Highest")} valeur={n2(a.stats.premier)} ton="succes" />
-          <StatCard libelle={t("Dernier", "Lowest")} valeur={n2(a.stats.dernier)} ton="danger" />
-          <StatCard libelle={t("Taux de réussite", "Pass rate")} valeur={`${a.stats.reussite} %`} ton="alerte" />
-        </div>
+        <Tabs
+          onglets={[
+            { href: base, libelle: t("Toute l'année", "Whole year") },
+            ...periodes.map((p) => ({
+              href: `${base}?periode=${p.id}`,
+              libelle: p.type === "SEQUENCE" ? t(`Séquence ${p.numero}`, `Sequence ${p.numero}`) : t(`Trimestre ${p.numero}`, `Term ${p.numero}`),
+            })),
+          ]}
+        />
         <Card>
-          <CardHeader titre={t("Résultats par élève", "Results per student")} />
-          <Table className="min-w-[900px]">
+          <Table>
             <thead>
               <tr>
                 <Th>{t("Rang", "Rank")}</Th>
                 <Th>{t("Élève", "Student")}</Th>
-                {a.matieres.map((m) => (
-                  <Th key={m.libelle} className="text-center">
-                    {m.libelle.slice(0, 5)}
-                    <span className="block font-normal normal-case">coef {m.coefficient}</span>
-                  </Th>
+                {r.matieres.map((m) => (
+                  <Th key={m.id}>{m.nom} <span className="text-[10px] font-normal text-muted">×{m.coefficient}</span></Th>
                 ))}
-                <Th className="text-center">{t("Moy.", "Avg.")}</Th>
-                <Th>{t("Appréciation", "Comment")}</Th>
+                <Th>{t("Moyenne", "Average")}</Th>
               </tr>
             </thead>
             <tbody>
-              {a.lignes.map((l) => (
-                <tr key={l.eleveId}>
-                  <Td className="font-bold">{l.rang}{l.rang === 1 ? (lang === "en" ? "st" : "er") : lang === "en" ? "th" : "e"}</Td>
-                  <Td className="whitespace-nowrap font-semibold">{l.nom}</Td>
-                  {l.moyennes.map((m) => (
-                    <Td key={m.matiere} className={`text-center ${m.moyenne < 10 ? "text-red-600" : ""}`}>{n2(m.moyenne)}</Td>
+              {r.eleves.length === 0 && <LigneVide colSpan={3 + r.matieres.length} texte={t("Aucun élève.", "No student.")} />}
+              {r.eleves.map((e) => (
+                <tr key={e.eleveId}>
+                  <Td className="font-semibold">{e.rang ?? "—"}</Td>
+                  <Td>{e.nom} {e.prenom}</Td>
+                  {r.matieres.map((m) => (
+                    <Td key={m.id}>{note(e.moyennes[m.id])}</Td>
                   ))}
-                  <Td className={`text-center font-bold ${l.moyenneGenerale < 10 ? "text-red-600" : "text-navy-800"}`}>{n2(l.moyenneGenerale)}</Td>
-                  <Td className="whitespace-nowrap text-muted">{l.appreciation}</Td>
+                  <Td className="font-bold text-navy-800">{note(e.moyenneGenerale)}</Td>
                 </tr>
               ))}
             </tbody>

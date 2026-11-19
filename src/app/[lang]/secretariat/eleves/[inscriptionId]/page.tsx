@@ -1,8 +1,8 @@
-// Route : /[lang]/secretariat/eleves/[inscriptionId] — Dossier de l'élève.
-// CU-SEC-03 (affecter/transférer), CU-SEC-04 (code de liaison), CU-SEC-06 (corrections), CU-SEC-08 (documents), CU-SEC-10 (archivage).
+// Route : /[lang]/secretariat/eleves/[inscriptionId] — Dossier de l'élève (le paramètre est l'identifiant de l'élève).
 import { DossierEleve } from "@/features/eleves/components/dossier-eleve";
+import { premier } from "@/lib/utils";
 
-export default async function DossierElevePage({ params }: PageProps<"/[lang]/secretariat/eleves/[inscriptionId]">) {
-  const { inscriptionId } = await params;
-  return <DossierEleve id={inscriptionId} espace="secretariat" />;
+export default async function Page({ params, searchParams }: PageProps<"/[lang]/secretariat/eleves/[inscriptionId]">) {
+  const [{ inscriptionId }, sp] = await Promise.all([params, searchParams]);
+  return <DossierEleve eleveId={inscriptionId} espace="secretariat" inscrit={premier(sp.inscrit) === "1"} />;
 }

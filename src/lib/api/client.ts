@@ -1,64 +1,62 @@
-// Client HTTP côté serveur vers l'API Spring Boot.
-// - Le jeton d'accès est lu dans la session (cookie httpOnly) et n'atteint jamais le navigateur.
-// - L'établissement courant est transmis dans l'en-tête X-Etablissement-Id (multi-tenant).
-// - Si USE_MOCK_API n'est pas "false", les fonctions lire()/ecrire() utilisent les données d'exemple.
+// Client HTTP côté serveur vers l'API Spring Boot SchoolConnect (/api/v1).
+// Le jeton d'accès est lu dans la session (cookie httpOnly) et n'atteint jamais le navigateur.
 import "server-only";
-import { connection } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { ApiError } from "./errors";
 
-export const USE_MOCK = process.env.USE_MOCK_API !== "false";
-const API_URL = process.env.API_URL ?? "http://localhost:8080/api";
+export const API_URL = (process.env.API_URL ?? "http://localhost:8080/api/v1").replace(/\/$/, "");
 
 type Query = Record<string, string | number | boolean | undefined | null>;
 
 function construireUrl(path: string, query?: Query) {
-  const url = new URL(API_URL.replace(/\/$/, "") + path);
+  const url = new URL(API_URL + path);
   for (const [k, v] of Object.entries(query ?? {})) {
     if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
   }
   return url;
 }
 
+/**
+ * Format d'erreur du backend : { status, message: "Bad Request", error: "Données invalides", details: { champ: "…" } }.
+ * Le texte destiné à l'utilisateur est dans `error` (complété par `details`).
+ */
+async function erreurApi(res: Response, avecJeton: boolean): Promise<ApiError> {
+  const data = (await res.json().catch(() => ({}))) as { message?: string; error?: string; details?: Record<string, string> };
+  const details =
+    data.details && Object.keys(data.details).length
+      ? " : " + Object.entries(data.details).map(([k, v]) => `${k} (${v})`).join(", ")
+      : "";
+  const texte = data.error ?? data.message ?? res.statusText;
+  // 401 sans jeton = identifiants refusés à la connexion ; avec jeton = session expirée côté backend.
+  const message =
+    res.status === 401 && avecJeton
+      ? "Session expirée. Reconnectez-vous."
+      : res.status === 403 && !data.error
+        ? "Accès refusé."
+        : texte + details;
+  return new ApiError(res.status, message);
+}
+
 export async function apiFetch<T>(
   path: string,
-  init: { method?: string; body?: unknown; query?: Query } = {},
+  init: { method?: string; body?: unknown; query?: Query; jeton?: string } = {},
 ): Promise<T> {
-  const session = await getSession();
-  const res = await fetch(construireUrl(path, init.query), {
-    method: init.method ?? "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...(session?.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {}),
-      ...(session?.etablissementId ? { "X-Etablissement-Id": session.etablissementId } : {}),
-      "Accept-Language": session?.langue ?? "fr",
-    },
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { message?: string; code?: string };
-    throw new ApiError(res.status, data.message ?? res.statusText, data.code);
+  const jeton = init.jeton ?? (await getSession())?.accessToken;
+  let res: Response;
+  try {
+    res = await fetch(construireUrl(path, init.query), {
+      method: init.method ?? "GET",
+      headers: {
+        "Content-Type": "application/json",
+        ...(jeton ? { Authorization: `Bearer ${jeton}` } : {}),
+      },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      cache: "no-store",
+    });
+  } catch {
+    throw new ApiError(503, "Le serveur SchoolConnect est injoignable. Réessayez dans un instant.");
   }
-  return (res.status === 204 ? undefined : await res.json()) as T;
-}
-
-/** Lecture : données d'exemple en mode mock, sinon GET sur l'API. */
-export async function lire<T>(mock: () => T, path: string, query?: Query): Promise<T> {
-  if (USE_MOCK) {
-    await connection(); // données lues à chaque requête, jamais figées au build
-    return mock();
-  }
-  return apiFetch<T>(path, { query });
-}
-
-/** Écriture (Server Actions) : mutation des données d'exemple, sinon appel à l'API. */
-export async function ecrire<T>(
-  mock: () => T,
-  path: string,
-  method: "POST" | "PUT" | "PATCH" | "DELETE" = "POST",
-  body?: unknown,
-): Promise<T> {
-  if (USE_MOCK) return mock();
-  return apiFetch<T>(path, { method, body });
+  if (!res.ok) throw await erreurApi(res, Boolean(jeton));
+  const texte = res.status === 204 ? "" : await res.text();
+  return (texte ? JSON.parse(texte) : undefined) as T;
 }

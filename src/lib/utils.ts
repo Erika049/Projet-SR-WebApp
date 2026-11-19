@@ -28,3 +28,10 @@ export function avecParams(base: string, params: Record<string, string | number 
 export function premier(v: string | string[] | undefined): string | undefined {
   return Array.isArray(v) ? v[0] : v;
 }
+
+/** Vrai si « YYYY-MM-DD » désigne une date réelle (refuse le 31/02, le 30/02…). */
+export function dateValide(iso: string) {
+  if (!/^\d{4}-\d\d-\d\d$/.test(iso)) return false;
+  const d = new Date(`${iso}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === iso;
+}

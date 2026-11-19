@@ -1,4 +1,4 @@
-// Paramétrage de l'année (CU-DIR-02) : en-tête commun + onglets.
+// Paramétrage de l'année (CU-DIR-02) : en-tête commun + onglets. Toutes les données viennent du backend.
 import { getLang, getT } from "@/lib/i18n/server";
 import { PageBody, PageHeader } from "@/components/layout/page-header";
 import { Tabs } from "@/components/ui/tabs";
@@ -10,7 +10,7 @@ export default async function ParametrageLayout({ children }: { children: React.
     <>
       <PageHeader
         titre={t("Paramétrage de l'année", "School year settings")}
-        sousTitre={t("Tout ce qui définit l'année scolaire se règle ici. Les changements s'appliquent aux mobiles des parents et des enseignants.", "Everything that defines the school year is set here. Changes apply to parents' and teachers' mobile apps.")}
+        sousTitre={t("Année scolaire, périodes, classes, matières et emploi du temps. Les changements s'appliquent aussitôt aux applications mobiles.", "School year, terms, classes, subjects and timetable. Changes apply at once to the mobile apps.")}
       />
       <PageBody>
         <Tabs
@@ -18,9 +18,7 @@ export default async function ParametrageLayout({ children }: { children: React.
             { href: base, libelle: t("Année et périodes", "Year and terms") },
             { href: `${base}/classes`, libelle: t("Classes", "Classes") },
             { href: `${base}/matieres`, libelle: t("Matières et coefficients", "Subjects and coefficients") },
-            { href: `${base}/calendrier`, libelle: t("Calendrier", "Calendar") },
-            { href: `${base}/evaluation`, libelle: t("Évaluation", "Assessment") },
-            { href: `${base}/frais`, libelle: t("Frais", "Fees") },
+            { href: `${base}/emploi-du-temps`, libelle: t("Emploi du temps", "Timetable") },
           ]}
         />
         {children}

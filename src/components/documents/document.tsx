@@ -1,4 +1,4 @@
-import { BookOpen } from "lucide-react";
+import { Logo } from "@/components/ui/logo";
 import { PrintButton } from "./print-button";
 
 /** Gabarit A4 des documents officiels imprimables (certificat, fiche de liaison, reçu). */
@@ -26,9 +26,7 @@ export function DocumentOfficiel({
       <article className="document-imprimable mx-auto max-w-[210mm] rounded-2xl border border-line bg-white p-10 shadow-sm">
         <header className="flex items-start justify-between border-b-2 border-navy-700 pb-4">
           <div className="flex items-center gap-3">
-            <span className="grid size-12 place-items-center rounded-xl bg-navy-700 text-white">
-              <BookOpen className="size-6" />
-            </span>
+            <Logo taille={52} />
             <div>
               <p className="text-lg font-bold text-navy-800">{etablissement.nom}</p>
               <p className="text-xs text-muted">{etablissement.adresse} · {etablissement.telephone} · {etablissement.email}</p>

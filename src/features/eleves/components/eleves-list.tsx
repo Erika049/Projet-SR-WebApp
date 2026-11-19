@@ -1,103 +1,99 @@
-// Liste des élèves : consultation (direction) ou gestion (secrétariat).
+// Répertoire des élèves de l'année courante (backend : /etablissements/{id}/repertoire-eleves).
+// Consultation (direction) ou gestion (secrétariat) ; filtre par classe et recherche par nom ou matricule.
 import Link from "next/link";
+import { UserPlus } from "lucide-react";
 import { getLang, getT } from "@/lib/i18n/server";
-import { numeroPage, texteRecherche } from "@/lib/api/pagination";
-import { LIAISON, lib, ton } from "@/lib/labels";
+import { dateCourte } from "@/lib/format";
+import { classes as lireClasses, repertoire } from "@/lib/api/backend";
 import { premier } from "@/lib/utils";
-import { listerEleves } from "@/features/eleves/queries";
-import { listerClasses } from "@/features/parametrage/queries";
+import { PageBody, PageHeader } from "@/components/layout/page-header";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { LigneVide, Pagination, Table, Td, Th } from "@/components/ui/data-table";
-import { Personne } from "@/components/ui/avatar";
+import { LigneVide, Table, Td, Th } from "@/components/ui/data-table";
+import { SearchInput } from "@/components/ui/search-input";
+import { GrilleStats, StatCard } from "@/components/ui/stat-card";
+import { Tabs } from "@/components/ui/tabs";
 
-type SP = Record<string, string | string[] | undefined>;
-
-export async function ElevesList({ sp, espace }: { sp: SP; espace: "direction" | "secretariat" }) {
-  const [t, lang, classes] = await Promise.all([getT(), getLang(), listerClasses()]);
-  const filtres = {
-    q: texteRecherche(sp.q),
-    classeId: premier(sp.classe) || undefined,
-    liaison: premier(sp.liaison) || undefined,
-    dossier: premier(sp.dossier) || undefined,
-    page: numeroPage(sp.page),
-  };
-  const page = await listerEleves(filtres);
+export async function ElevesList({ espace, searchParams }: { espace: "secretariat" | "direction"; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const [sp, t, lang, eleves, classes] = await Promise.all([searchParams, getT(), getLang(), repertoire(), lireClasses()]);
+  const q = (premier(sp.q) ?? "").trim().toLowerCase();
+  const classe = premier(sp.classe) ?? "";
   const base = `/${lang}/${espace}/eleves`;
+  const liste = eleves.filter(
+    (e) =>
+      (!classe || e.classeId === classe) &&
+      (!q || `${e.nom} ${e.prenom} ${e.matricule}`.toLowerCase().includes(q)),
+  );
+  const lies = eleves.filter((e) => e.liaison === "LIEE").length;
+  const LIAISON: Record<string, [string, "succes" | "alerte" | "danger"]> = {
+    LIEE: [t("Parent lié", "Parent linked"), "succes"],
+    EN_ATTENTE: [t("Demande à valider", "Request pending"), "alerte"],
+    NON_LIEE: [t("Aucun parent", "No parent"), "danger"],
+  };
 
   return (
-    <Card>
-      <form method="get" className="mb-4 flex flex-wrap items-end gap-2">
-        <input name="q" defaultValue={filtres.q} placeholder={t("Nom, matricule ou tuteur…", "Name, ID or guardian…")} className="input max-w-xs" />
-        <select name="classe" defaultValue={filtres.classeId ?? ""} className="input w-auto">
-          <option value="">{t("Toutes les classes", "All classes")}</option>
-          {classes.map((c) => (
-            <option key={c.id} value={c.id}>{c.libelle}</option>
-          ))}
-        </select>
-        <select name="liaison" defaultValue={filtres.liaison ?? ""} className="input w-auto">
-          <option value="">{t("Accès parent : tous", "Parent access: all")}</option>
-          <option value="liee">{t("Liée", "Linked")}</option>
-          <option value="en_attente">{t("En attente", "Pending")}</option>
-          <option value="non_liee">{t("Non liée", "Not linked")}</option>
-        </select>
-        {espace === "secretariat" && (
-          <select name="dossier" defaultValue={filtres.dossier ?? ""} className="input w-auto">
-            <option value="">{t("Dossier : tous", "File: all")}</option>
-            <option value="complet">{t("Complet", "Complete")}</option>
-            <option value="incomplet">{t("Incomplet", "Incomplete")}</option>
-          </select>
-        )}
-        <button className="rounded-lg bg-navy-700 px-4 py-2 text-sm font-semibold text-white">{t("Filtrer", "Filter")}</button>
-        {(filtres.q || filtres.classeId || filtres.liaison || filtres.dossier) && (
-          <Link href={base} className="px-2 py-2 text-sm font-semibold text-navy-700 hover:underline">{t("Réinitialiser", "Reset")}</Link>
-        )}
-      </form>
-      <Table>
-        <thead>
-          <tr>
-            <Th>{t("Matricule", "ID")}</Th>
-            <Th>{t("Nom", "Name")}</Th>
-            <Th>{t("Classe", "Class")}</Th>
-            <Th>{t("Tuteur", "Guardian")}</Th>
-            <Th>{t("Accès parent", "Parent access")}</Th>
-            <Th>{espace === "secretariat" ? t("Dossier", "File") : t("Statut", "Status")}</Th>
-            <Th />
-          </tr>
-        </thead>
-        <tbody>
-          {page.items.length === 0 && <LigneVide colSpan={7} texte={t("Aucun élève ne correspond à la recherche.", "No student matches your search.")} />}
-          {page.items.map((e) => (
-            <tr key={e.id}>
-              <Td className="font-mono text-xs">{e.matricule}</Td>
-              <Td><Personne nom={`${e.prenom} ${e.nom}`} /></Td>
-              <Td>{e.classe.libelle}</Td>
-              <Td className="text-muted">{e.tuteur.nom}</Td>
-              <Td><Badge ton={ton(LIAISON, e.liaison)}>{lib(LIAISON, e.liaison, t)}</Badge></Td>
-              <Td>
-                {espace === "secretariat" ? (
-                  <Badge ton={e.dossierComplet ? "succes" : "alerte"}>{e.dossierComplet ? t("Complet", "Complete") : t("Incomplet", "Incomplete")}</Badge>
-                ) : (
-                  <Badge ton={e.redoublant ? "alerte" : "succes"}>{e.redoublant ? t("Redoublant", "Repeating") : t("Actif", "Active")}</Badge>
-                )}
-              </Td>
-              <Td className="text-right">
-                <Link href={`${base}/${e.id}`} className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-navy-700 hover:bg-navy-50">
-                  {espace === "secretariat" ? t("Ouvrir", "Open") : t("Consulter", "View")}
-                </Link>
-              </Td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
-      <Pagination
-        page={page.page}
-        total={page.total}
-        taille={page.taille}
-        base={base}
-        params={{ q: filtres.q || undefined, classe: filtres.classeId, liaison: filtres.liaison, dossier: filtres.dossier }}
-        t={t}
+    <>
+      <PageHeader
+        titre={t("Élèves", "Students")}
+        sousTitre={t(`${eleves.length} élèves inscrits cette année`, `${eleves.length} students enrolled this year`)}
+        actions={
+          espace === "secretariat" ? (
+            <Link href={`${base}/nouveau`} className="inline-flex items-center gap-2 rounded-lg bg-navy-700 px-4 py-2 text-sm font-semibold text-white">
+              <UserPlus className="size-4" /> {t("Inscrire un élève", "Enrol a student")}
+            </Link>
+          ) : undefined
+        }
       />
-    </Card>
+      <PageBody>
+        <GrilleStats>
+          <StatCard libelle={t("Élèves", "Students")} valeur={eleves.length} detail={t(`${classes.length} classes`, `${classes.length} classes`)} />
+          <StatCard libelle={t("Filles", "Girls")} valeur={eleves.filter((e) => e.sexe === "F").length} detail={t("Garçons", "Boys") + ` : ${eleves.filter((e) => e.sexe === "M").length}`} />
+          <StatCard libelle={t("Parents liés", "Linked parents")} valeur={lies} detail={t("Accès à l'application mobile", "Mobile app access")} ton="succes" />
+          <StatCard libelle={t("Sans parent lié", "Without parent")} valeur={eleves.length - lies} detail={t("Code de liaison à remettre", "Link code to hand out")} ton="alerte" />
+        </GrilleStats>
+        <Tabs
+          onglets={[
+            { href: base + (q ? `?q=${encodeURIComponent(q)}` : ""), libelle: t("Toutes les classes", "All classes"), compteur: eleves.length },
+            ...classes.map((c) => ({
+              href: `${base}?classe=${c.id}${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+              libelle: c.nom,
+              compteur: eleves.filter((e) => e.classeId === c.id).length,
+            })),
+          ]}
+        />
+        <Card>
+          <div className="mb-4">
+            <SearchInput defaut={q} placeholder={t("Nom, prénom ou matricule", "Name or student ID")} conserver={{ classe }} libelleBouton={t("Rechercher", "Search")} />
+          </div>
+          <Table>
+            <thead>
+              <tr>
+                <Th>{t("Élève", "Student")}</Th>
+                <Th>{t("Matricule", "Student ID")}</Th>
+                <Th>{t("Classe", "Class")}</Th>
+                <Th>{t("Naissance", "Born")}</Th>
+                <Th>{t("Accès parent", "Parent access")}</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {liste.length === 0 && <LigneVide colSpan={5} texte={t("Aucun élève.", "No students.")} />}
+              {liste.map((e) => (
+                <tr key={e.eleveId}>
+                  <Td>
+                    <Link href={`${base}/${e.eleveId}`} className="font-semibold text-navy-700 hover:underline">
+                      {e.nom} {e.prenom}
+                    </Link>
+                  </Td>
+                  <Td className="font-mono text-xs">{e.matricule}</Td>
+                  <Td>{e.classeNom ?? <span className="text-muted">{t("Non affecté", "Not assigned")}</span>}</Td>
+                  <Td className="text-muted">{dateCourte(e.dateNaissance, lang)}</Td>
+                  <Td><Badge ton={LIAISON[e.liaison][1]}>{LIAISON[e.liaison][0]}</Badge></Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </Card>
+      </PageBody>
+    </>
   );
 }

@@ -1,64 +1,61 @@
-// Route : /[lang]/comptabilite/rapports — Rapports de caisse journaliers et périodiques (CU-ECO-08) et exports (CU-ECO-09).
+// Route : /[lang]/comptabilite/rapports?du=&au= — Rapport de caisse par mode et journal des paiements (CU-ECO-08/09).
+import Link from "next/link";
 import { getLang, getT } from "@/lib/i18n/server";
-import { dateCourte, fcfa, millions, moisCourt, nombre } from "@/lib/format";
-import { rapportFinancier } from "@/features/finances/queries";
+import { aujourdhuiIso, dateCourte, fcfa } from "@/lib/format";
+import { MODE_PAIEMENT, lib } from "@/lib/labels";
+import { premier } from "@/lib/utils";
+import { MODES, journalCaisse } from "@/lib/api/backend";
 import { PageBody, PageHeader } from "@/components/layout/page-header";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ButtonLink } from "@/components/ui/button";
-import { Table, Td, Th } from "@/components/ui/data-table";
 import { GrilleStats, StatCard } from "@/components/ui/stat-card";
-import { BarChart } from "@/components/charts/bar-chart";
+import { LigneVide, Table, Td, Th } from "@/components/ui/data-table";
 
-export default async function RapportsCaissePage() {
-  const [t, lang, r] = await Promise.all([getT(), getLang(), rapportFinancier()]);
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export default async function RapportsPage({ searchParams }: PageProps<"/[lang]/comptabilite/rapports">) {
+  const [sp, t, lang] = await Promise.all([searchParams, getT(), getLang()]);
+  const aujourdhui = aujourdhuiIso();
+  const du = DATE.test(premier(sp.du) ?? "") ? premier(sp.du)! : `${aujourdhui.slice(0, 8)}01`;
+  const au = DATE.test(premier(sp.au) ?? "") ? premier(sp.au)! : aujourdhui;
+  const journal = await journalCaisse(du, au);
+  const valides = journal.filter((p) => p.statut === "VALIDE");
+  const parMode = Object.entries(MODES).map(([api, cle]) => {
+    const l = valides.filter((p) => p.mode === api);
+    return { cle, nombre: l.length, total: l.reduce((s, p) => s + Number(p.montant), 0) };
+  }).filter((m) => m.nombre > 0);
+  const total = valides.reduce((s, p) => s + Number(p.montant), 0);
   return (
     <>
-      <PageHeader
-        titre={t("Rapports de caisse", "Cash reports")}
-        sousTitre={t("Encaissements journaliers et mensuels, exportables pour la comptabilité.", "Daily and monthly collections, exportable for accounting.")}
-        actions={
-          <>
-            <ButtonLink href={`/api/exports/rapport-financier?lang=${lang}`} variante="secondaire" prefetch={false}>{t("Exporter le rapport", "Export report")}</ButtonLink>
-            <ButtonLink href={`/api/exports/paiements?lang=${lang}`} prefetch={false}>{t("Exporter tous les paiements", "Export all payments")}</ButtonLink>
-          </>
-        }
-      />
+      <PageHeader titre={t("Caisse et rapports", "Cash and reports")} sousTitre={`${dateCourte(du, lang)} → ${dateCourte(au, lang)}`} />
       <PageBody>
+        <form method="get" className="flex flex-wrap items-end gap-3">
+          <label className="text-sm"><span className="mb-1 block font-semibold">{t("Du", "From")}</span><input type="date" name="du" defaultValue={du} className="input" /></label>
+          <label className="text-sm"><span className="mb-1 block font-semibold">{t("Au", "To")}</span><input type="date" name="au" defaultValue={au} className="input" /></label>
+          <button className="rounded-lg border border-line bg-white px-4 py-2 text-sm font-semibold text-navy-700">{t("Afficher", "Show")}</button>
+          <Link href={`?du=${aujourdhui}&au=${aujourdhui}`} className="text-sm font-semibold text-navy-700 hover:underline">{t("Aujourd'hui", "Today")}</Link>
+          <a href={`/api/exports/paiements?du=${du}&au=${au}`} className="ml-auto text-sm font-semibold text-navy-700 hover:underline">{t("Exporter (Excel)", "Export (Excel)")}</a>
+        </form>
         <GrilleStats>
-          <StatCard libelle={t("Encaissé (année)", "Collected (year)")} valeur={millions(r.encaisse, lang)} detail="FCFA" ton="succes" />
-          <StatCard libelle={t("Attendu", "Expected")} valeur={millions(r.attendu, lang)} detail="FCFA" />
-          <StatCard libelle={t("Reste à encaisser", "Outstanding")} valeur={millions(r.reste, lang)} detail="FCFA" ton="alerte" />
-          <StatCard libelle={t("Taux de recouvrement", "Collection rate")} valeur={`${r.taux} %`} />
+          <StatCard libelle={t("Encaissé", "Collected")} valeur={fcfa(total, lang)} detail={t(`${valides.length} paiements`, `${valides.length} payments`)} ton="succes" />
+          {parMode.map((m) => (
+            <StatCard key={m.cle} libelle={lib(MODE_PAIEMENT, m.cle, t)} valeur={fcfa(m.total, lang)} detail={t(`${m.nombre} paiements`, `${m.nombre} payments`)} />
+          ))}
         </GrilleStats>
         <Card>
-          <CardHeader titre={t("Encaissements par mois", "Collections per month")} action={<span className="text-xs text-muted">{t("en millions de FCFA", "in millions FCFA")}</span>} />
-          <BarChart donnees={r.mois.map((m, i, arr) => ({ libelle: moisCourt(m.mois, lang), valeur: Math.round(m.montant / 100_000) / 10, accent: i === arr.length - 1 }))} format={(v) => nombre(v, lang, v % 1 ? 1 : 0)} />
-        </Card>
-        <Card>
-          <CardHeader titre={t("Caisse journalière", "Daily register")} sousTitre={t("10 derniers jours d'encaissement", "Last 10 collection days")} />
+          <CardHeader titre={t("Journal des paiements", "Payment journal")} />
           <Table>
-            <thead>
-              <tr>
-                <Th>{t("Date", "Date")}</Th>
-                <Th>{t("Espèces", "Cash")}</Th>
-                <Th>Mobile Money</Th>
-                <Th>{t("Virements", "Transfers")}</Th>
-                <Th>{t("Total", "Total")}</Th>
-                <Th>{t("Paiements", "Payments")}</Th>
-                <Th>{t("Clôture", "Closing")}</Th>
-              </tr>
-            </thead>
+            <thead><tr><Th>{t("Date", "Date")}</Th><Th>{t("Reçu", "Receipt")}</Th><Th>{t("Élève", "Student")}</Th><Th>{t("Montant", "Amount")}</Th><Th>{t("Mode", "Method")}</Th><Th>{t("Encaissé par", "Received by")}</Th></tr></thead>
             <tbody>
-              {r.jours.map((j) => (
-                <tr key={j.date}>
-                  <Td className="font-semibold">{dateCourte(j.date, lang)}</Td>
-                  <Td>{fcfa(j.especes, lang)}</Td>
-                  <Td>{fcfa(j.mobile, lang)}</Td>
-                  <Td>{fcfa(j.autres, lang)}</Td>
-                  <Td className="font-bold">{fcfa(j.total, lang)}</Td>
-                  <Td>{j.nombre}</Td>
-                  <Td>{j.cloture ? <Badge ton="navy">{t("Clôturée", "Closed")} · {j.cloture.par}</Badge> : <Badge ton="neutre">{t("Ouverte", "Open")}</Badge>}</Td>
+              {journal.length === 0 && <LigneVide colSpan={6} texte={t("Aucun paiement sur la période.", "No payment over the period.")} />}
+              {journal.map((p) => (
+                <tr key={p.id}>
+                  <Td className="text-muted">{dateCourte(p.date, lang)}</Td>
+                  <Td><Link href={`/${lang}/comptabilite/paiements/${p.id}`} className="font-mono text-xs text-navy-700 hover:underline">{p.numeroRecu}</Link></Td>
+                  <Td>{p.elevePrenom} {p.eleveNom}<span className="text-muted">{p.classeNom ? ` · ${p.classeNom}` : ""}</span></Td>
+                  <Td className="font-semibold">{fcfa(Number(p.montant), lang)} {p.statut === "ANNULE" && <Badge ton="danger">{t("Annulé", "Cancelled")}</Badge>}</Td>
+                  <Td>{lib(MODE_PAIEMENT, MODES[p.mode], t)}</Td>
+                  <Td className="text-muted">{p.encaissePar ?? "—"}</Td>
                 </tr>
               ))}
             </tbody>

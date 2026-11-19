@@ -1,5 +1,6 @@
 import type { Locale } from "@/types/domain";
 
+/** Erreur renvoyée par le backend SchoolConnect (message déjà rédigé pour l'utilisateur). */
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -11,18 +12,7 @@ export class ApiError extends Error {
   }
 }
 
-/** Erreur métier des données d'exemple (équivalent d'un 400/409 de l'API), en deux langues. */
-export class ErreurMetier extends ApiError {
-  constructor(
-    fr: string,
-    public en: string = fr,
-  ) {
-    super(400, fr, "METIER");
-  }
-}
-
 export function messageErreur(e: unknown, lang: Locale = "fr"): string {
-  if (e instanceof ErreurMetier) return lang === "en" ? e.en : e.message;
   if (e instanceof ApiError) return e.message;
   return lang === "en" ? "An unexpected error occurred." : "Une erreur inattendue est survenue.";
 }
